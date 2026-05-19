@@ -1,2 +1,345 @@
-# treeig
-Exact Integrated Gradients for tree ensembles, including XGBoost, LightGBM, Random Forests, and Gradient Boosting. Computes fast, exact feature attributions for tree models without Monte Carlo sampling or path approximations.
+# TreeIG
+
+TreeIG computes exact Integrated Gradients for tree ensembles. It decomposes
+the change in a fitted tree model's scalar output between a baseline input
+$x_0$ and an observation $x$ into additive feature contributions.
+
+For each observation, TreeIG returns feature attributions $\phi_j$
+satisfying
+
+```text
+sum_j phi_j = F(x) - F(x0)
+```
+
+where $F$ is the scalar model output being explained. For regression models,
+$F$ is the prediction. For supported classifiers, $F$ is the raw
+margin/logit, not the predicted probability.
+
+TreeIG extends the Integrated Gradients framework of
+Sundararajan, Taly, and Yan (2017) to tree ensembles by exploiting the
+piecewise-constant structure of tree models.
+
+## References
+
+Integrated Gradients:
+
+- Sundararajan, Mukund, Ankur Taly, and Qiqi Yan. 2017.
+  "Axiomatic Attribution for Deep Networks."
+  *International Conference on Machine Learning (ICML)*.
+
+SHAP and TreeSHAP:
+
+- Lundberg, Scott M., and Su-In Lee. 2017.
+  "A Unified Approach to Interpreting Model Predictions."
+  *Advances in Neural Information Processing Systems (NeurIPS)*.
+
+- Lundberg, Scott M., Gabriel Erion, and Su-In Lee. 2020.
+  "From Local Explanations to Global Understanding with Explainable AI for Trees."
+  *Nature Machine Intelligence*.
+
+Popular implementations of Integrated Gradients for smooth models include:
+
+- Captum for PyTorch:
+  https://captum.ai/
+
+- TensorFlow Integrated Gradients tutorials:
+  https://www.tensorflow.org/tutorials/interpretability/integrated_gradients
+
+## Why TreeIG?
+
+Standard Integrated Gradients defines feature contributions by integrating
+model gradients along a path from a baseline input to the observation.
+Tree models are piecewise constant, so ordinary gradients are zero almost
+everywhere and undefined at split boundaries.
+
+TreeIG uses the tree structure directly. Along the straight-line path
+
+```text
+x(t) = x0 + t * (x - x0),    0 <= t <= 1,
+```
+
+a tree prediction changes only when the path crosses a split threshold.
+TreeIG finds those crossings exactly and assigns each jump in prediction
+to the feature responsible for the crossing. For ensembles, contributions
+are summed across trees.
+
+This gives an exact additive decomposition for tree models without
+numerical quadrature.
+
+## Relation to SHAP and TreeSHAP
+
+TreeIG and TreeSHAP answer different attribution questions.
+
+TreeSHAP computes Shapley-value attributions based on conditional or
+interventional feature perturbations. Its contributions measure how
+features contribute to the model prediction relative to a reference
+distribution over feature subsets.
+
+TreeIG instead explains the realized change in model output along a
+specific path from a baseline input $x_0$ to an observation $x$.
+The attribution is therefore path-based rather than subset-based.
+
+For smooth models, TreeIG reduces to ordinary Integrated Gradients.
+For tree models, TreeIG computes the exact path decomposition implied
+by split crossings.
+
+Neither framework dominates the other. They address different
+counterfactual questions and therefore produce different decompositions.
+
+## Supported models
+
+TreeIG currently supports finite numeric inputs for these model classes.
+
+### Regression
+
+- `sklearn.tree.DecisionTreeRegressor`
+- `sklearn.ensemble.RandomForestRegressor`
+- `sklearn.ensemble.ExtraTreesRegressor`
+- `sklearn.ensemble.GradientBoostingRegressor`
+- `xgboost.XGBRegressor`
+- `xgboost.Booster`
+- `lightgbm.LGBMRegressor`
+- `lightgbm.Booster`
+
+### Classification, raw margins only
+
+- `sklearn.ensemble.GradientBoostingClassifier`
+- `xgboost.XGBClassifier`
+- `lightgbm.LGBMClassifier`
+
+For classification models, TreeIG attributes raw scores, margins, or
+logits. It does not currently attribute predicted probabilities.
+
+## Not currently supported
+
+TreeIG deliberately does not yet support:
+
+- probability-output attribution;
+- missing-value routing;
+- categorical splits;
+- CatBoost;
+- probability-averaging or vote-share classifiers such as
+  `DecisionTreeClassifier`, `RandomForestClassifier`, and
+  `ExtraTreesClassifier`.
+
+## Installation
+
+```bash
+pip install treeig
+```
+
+Or locally:
+
+```bash
+pip install -e .
+```
+
+## Basic usage
+
+```python
+import numpy as np
+import treeig as tig
+
+# model is a fitted supported tree model
+x0 = X_train.mean(axis=0)
+X_eval = X_test[:100]
+
+ig = tig.TreeIG(model, baseline=x0)
+phi = ig.attribute(X_eval)
+```
+
+`phi` has the same shape as `X_eval`. Row `i`, column `j`
+is the contribution of feature `j` to the model-output change from
+`x0` to `X_eval[i]`.
+
+For regression models:
+
+```python
+np.testing.assert_allclose(
+    phi.sum(axis=1),
+    model.predict(X_eval) - model.predict(x0.reshape(1, -1))[0],
+)
+```
+
+## Diagnostics
+
+Use `explain` when you want attributions together with completeness
+diagnostics.
+
+```python
+ig = tig.TreeIG(model, baseline=x0)
+phi, infos, summary = ig.explain(X_eval)
+
+print(summary)
+```
+
+Each entry in `infos` contains diagnostics for one observation:
+
+```python
+{
+    "n_events": ...,          # number of split-crossing events
+    "endpoint_delta": ...,    # F(x) - F(x0)
+    "attribution_sum": ...,   # sum_j phi_j
+    "residual": ...,          # attribution_sum - endpoint_delta
+    "abs_residual": ...,
+}
+```
+
+The `summary` dictionary reports aggregate residual and event-count
+statistics.
+
+## Classification targets
+
+For binary additive-score classifiers, `target=None` and `target=1`
+both attribute the positive-class margin. `target=0` attributes the
+negative margin, implemented as the negative of the positive-class
+margin.
+
+```python
+ig = tig.TreeIG(model, baseline=x0, target=1)
+phi_pos = ig.attribute(X_eval)
+
+ig = tig.TreeIG(model, baseline=x0, target=0)
+phi_neg = ig.attribute(X_eval)
+```
+
+For multiclass classifiers, pass the class index explicitly.
+
+```python
+ig = tig.TreeIG(model, baseline=x0, target=2)
+phi_class_2 = ig.attribute(X_eval)
+```
+
+TreeIG attributes raw class margins. If probability-space explanations
+are needed, users should transform or interpret the margin-level
+contributions separately.
+
+## Warmup
+
+TreeIG uses Numba for fast attribution kernels. The first call may
+include compilation time. You can compile the kernels in advance with
+`warmup`.
+
+```python
+ig = tig.TreeIG(model, baseline=x0).warmup(X_eval[:3])
+phi = ig.attribute(X_eval)
+```
+
+## Functional interface
+
+TreeIG also provides a direct functional interface.
+
+```python
+phi, infos, summary = tig.compute(
+    model,
+    baseline=x0,
+    X=X_eval,
+)
+```
+
+For backward compatibility, the following aliases are also available:
+
+```python
+from treeig import (
+    exact_gb_ig_batch_fast,
+    warmup_exact_gb_ig,
+    timed_call,
+)
+```
+
+## Numerical conventions
+
+TreeIG follows each backend's split-routing convention as closely as
+possible.
+
+- scikit-learn trees route left when `x[j] <= threshold`;
+- LightGBM numeric splits route left when `x[j] <= threshold`;
+- XGBoost numeric splits route left when `x[j] < threshold`
+  using float32-style comparisons.
+
+Inputs must be finite numeric arrays. Missing-value routing is not
+currently implemented, so `NaN` and `Inf` values raise errors.
+
+## Baselines
+
+The baseline `x0` defines the reference point for the decomposition.
+Common choices include:
+
+- the training-sample mean;
+- a median or representative observation;
+- a domain-specific neutral input;
+- a fixed benchmark case.
+
+The attribution always explains the difference between the model output
+at the observation and the model output at the chosen baseline.
+Different baselines answer different questions.
+
+## Interpretation
+
+For an observation `x`, TreeIG reports how much each feature contributes
+to moving the model output from `F(x0)` to `F(x)` along the straight-line
+path from `x0` to `x`.
+
+Positive contributions increase the scalar output relative to the
+baseline. Negative contributions decrease it. The contributions are
+additive by construction.
+
+## Example: XGBoost regression
+
+```python
+import numpy as np
+import xgboost as xgb
+import treeig as tig
+
+model = xgb.XGBRegressor(
+    n_estimators=100,
+    max_depth=3,
+    learning_rate=0.05,
+    objective="reg:squarederror",
+    random_state=0,
+)
+
+model.fit(X_train, y_train)
+
+x0 = X_train.mean(axis=0)
+X_eval = X_test[:100]
+
+ig = tig.TreeIG(model, baseline=x0).warmup(X_eval[:3])
+
+phi, infos, summary = ig.explain(X_eval)
+
+print(phi.shape)
+print(summary["max_abs_residual"])
+```
+
+## Example: multiclass classification margins
+
+```python
+import lightgbm as lgb
+import treeig as tig
+
+model = lgb.LGBMClassifier(...)
+model.fit(X_train, y_train)
+
+x0 = X_train.mean(axis=0)
+X_eval = X_test[:100]
+
+# Attribute class-2 raw margin
+ig = tig.TreeIG(model, baseline=x0, target=2)
+
+phi = ig.attribute(X_eval)
+```
+
+## Project status
+
+TreeIG is intended for exact additive attribution of fitted tree models
+in raw-output space. The current implementation focuses on correctness,
+backend-specific routing consistency, and a compact API.
+
+Future extensions may include:
+
+- probability-space attribution;
+- missing-value routing;
+- categorical splits;
+- CatBoost support;
+- additional attribution paths and allocation rules.

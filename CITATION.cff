@@ -1,0 +1,35 @@
+cff-version: 1.2.0
+title: "TreeIG"
+message: "If you use TreeIG in academic work, please cite the associated paper and repository."
+type: software
+
+authors:
+  - family-names: "Hentschel"
+    given-names: "Ludger"
+
+repository-code: "https://github.com/lhentschel/treeig"
+
+license: "BSD-3-Clause"
+
+keywords:
+  - machine learning
+  - interpretability
+  - integrated gradients
+  - feature attribution
+  - explainable ai
+  - xgboost
+  - lightgbm
+  - tree ensembles
+
+abstract: >
+  TreeIG computes exact Integrated Gradients feature attributions
+  for tree ensembles, including XGBoost, LightGBM, and selected
+  scikit-learn tree models.
+
+preferred-citation:
+  type: article
+  authors:
+    - family-names: "Hentschel"
+      given-names: "Ludger"
+  title: "TreeIG: Exact Integrated Gradients for Tree-Based Models"
+  year: 2026
