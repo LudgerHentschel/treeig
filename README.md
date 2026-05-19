@@ -67,25 +67,33 @@ are summed across trees.
 This gives an exact additive decomposition for tree models without
 numerical quadrature.
 
+For smooth models, TreeIG reduces to ordinary Integrated Gradients. For tree models, TreeIG computes the exact path decomposition implied by split crossings.
+
 ## Relation to SHAP and TreeSHAP
 
-TreeIG and TreeSHAP answer different attribution questions.
+TreeIG and TreeSHAP answer different attribution questions and generally
+produce different decompositions. Neither dominates the other.
 
-TreeSHAP computes Shapley-value attributions based on conditional or
-interventional feature perturbations. Its contributions measure how
-features contribute to the model prediction relative to a reference
-distribution over feature subsets.
+**TreeIG** answers: *"How much does feature j contribute to the change in
+prediction as we move continuously from baseline x₀ to observation x?"*
+Attribution is the integral of partial derivatives along the path from x₀
+to x. For piecewise-constant trees this integral reduces exactly to a sum of
+prediction jumps at split boundaries crossed along the path.
 
-TreeIG instead explains the realized change in model output along a
-specific path from a baseline input $x_0$ to an observation $x$.
-The attribution is therefore path-based rather than subset-based.
+**TreeSHAP** answers: *"How much does feature j individually shift the
+expected prediction, averaged over all possible subsets of the other
+features?"* Attribution is an average of discrete inclusion effects, where
+absent features are marginalized out over a background dataset. There is no
+path and no baseline input; the reference point is the average prediction
+over the background distribution.
 
-For smooth models, TreeIG reduces to ordinary Integrated Gradients.
-For tree models, TreeIG computes the exact path decomposition implied
-by split crossings.
-
-Neither framework dominates the other. They address different
-counterfactual questions and therefore produce different decompositions.
+The methods differ in two fundamental ways. First, TreeIG takes a specific
+baseline input x₀ as its reference; TreeSHAP takes a background
+distribution. Second, TreeIG measures contributions through calculus —
+integrating how the prediction changes as each feature moves continuously
+from its baseline value — while TreeSHAP measures contributions through
+discrete feature inclusion, asking how much each feature shifts the
+expected prediction when it enters a coalition.
 
 ## Supported models
 
