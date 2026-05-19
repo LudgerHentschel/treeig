@@ -14,6 +14,17 @@ TreeIG extends the Integrated Gradients framework of Sundararajan, Taly, and Yan
 
 TreeIG uses generalized gradients to extend Integrated Gradients to tree-based models. The integrals of the generalized gradients are exactly equal to the sum of the prediction steps along the input path. TreeIG uses this equivalence to efficiently compute Integrated Gradients for tree models. 
 
+## Using TreeIG
+
+TreeIG follows a familiar explainer pattern:
+
+```python
+ig = treeig.TreeIG(model, baseline=x0)
+phi = ig.attribute(X)
+```
+
+TreeIG computes exact Integrated Gradients for supported tree models. It does not rely on Monte Carlo sampling, numerical integration, or approximation parameters controlling attribution accuracy.
+
 ## References
 
 TreeIG:
@@ -97,7 +108,7 @@ expected prediction when it enters a coalition.
 
 ## Supported models
 
-TreeIG currently supports finite numeric inputs for these model classes.
+TreeIG currently supports tree models with finite numeric feature inputs.
 
 ### Regression
 
@@ -110,14 +121,15 @@ TreeIG currently supports finite numeric inputs for these model classes.
 - `lightgbm.LGBMRegressor`
 - `lightgbm.Booster`
 
-### Classification, raw margins only
+### Classification (raw margins/logits only)
 
 - `sklearn.ensemble.GradientBoostingClassifier`
 - `xgboost.XGBClassifier`
 - `lightgbm.LGBMClassifier`
 
-For classification models, TreeIG attributes raw scores, margins, or
-logits. It does not currently attribute predicted probabilities.
+For classification models, TreeIG attributes raw margins or logits. It does not attribute predicted probabilities because these are not additive.
+
+TreeIG computes exact path decompositions directly from the fitted tree structure. Since tree representations differ substantially across implementations, each model family requires customized parsing and routing logic.
 
 ## Not currently supported
 
