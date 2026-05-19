@@ -76,8 +76,8 @@ produce different decompositions. Neither dominates the other.
 
 **TreeIG** answers: *"How much does feature j contribute to the change in
 prediction as we move continuously from baseline x₀ to observation x?"*
-Attribution is the integral of partial derivatives along the path from x₀
-to x. For piecewise-constant trees this integral reduces exactly to a sum of
+Attribution is the integral of partial derivatives along the path from `x0`
+to `x`. For piecewise-constant trees this integral reduces exactly to a sum of
 prediction jumps at split boundaries crossed along the path.
 
 **TreeSHAP** answers: *"How much does feature j individually shift the
@@ -88,7 +88,7 @@ path and no baseline input; the reference point is the average prediction
 over the background distribution.
 
 The methods differ in two fundamental ways. First, TreeIG takes a specific
-baseline input x₀ as its reference; TreeSHAP takes a background
+baseline input `x0` as its reference; TreeSHAP takes a background
 distribution. Second, TreeIG measures contributions through calculus —
 integrating how the prediction changes as each feature moves continuously
 from its baseline value — while TreeSHAP measures contributions through
@@ -246,16 +246,6 @@ phi, infos, summary = tig.compute(
 )
 ```
 
-For backward compatibility, the following aliases are also available:
-
-```python
-from treeig import (
-    exact_gb_ig_batch_fast,
-    warmup_exact_gb_ig,
-    timed_call,
-)
-```
-
 ## Numerical conventions
 
 TreeIG follows each backend's split-routing convention as closely as
@@ -347,8 +337,7 @@ backend-specific routing consistency, and a compact API.
 
 Future extensions may include:
 
-- probability-space attribution;
-- missing-value routing;
-- categorical splits;
-- CatBoost support;
-- additional attribution paths and allocation rules.
+- CatBoost support, which requires customized analysis of oblivious trees
+  and categorical split structure;
+- alternative allocation rules for simultaneous multi-feature effects at
+  coincident split crossings.
