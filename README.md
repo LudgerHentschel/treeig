@@ -20,7 +20,7 @@ TreeIG:
 
 - Hentschel, Ludger. 2026. 
   "TreeIG: Exact Integrated Gradients for Tree-Based Models."
-  *www.ludgerhentschel.com/Research.html*
+  *https://www.ludgerhentschel.com/Research.html*
 
 Integrated Gradients:
 
