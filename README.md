@@ -1,25 +1,26 @@
 # TreeIG
 
-TreeIG computes exact Integrated Gradients for tree ensembles. It decomposes
-the change in a fitted tree model's scalar output between a baseline input
-$x_0$ and an observation $x$ into additive feature contributions.
+TreeIG computes exact Integrated Gradients for tree ensembles. It decomposes the change in a fitted tree model's scalar output between a baseline input $x_0$ and an observation $x$ into additive feature contributions.
 
-For each observation, TreeIG returns feature attributions $\phi_j$
-satisfying
+For each observation, TreeIG returns feature attributions $\phi_j$ satisfying
 
 ```text
 sum_j phi_j = F(x) - F(x0)
 ```
 
-where $F$ is the scalar model output being explained. For regression models,
-$F$ is the prediction. For supported classifiers, $F$ is the raw
-margin/logit, not the predicted probability.
+where $F$ is the scalar model output being explained. For regression models, $F$ is the prediction. For supported classifiers, $F$ is the raw margin/logit, not the predicted probability.
 
-TreeIG extends the Integrated Gradients framework of
-Sundararajan, Taly, and Yan (2017) to tree ensembles by exploiting the
-piecewise-constant structure of tree models.
+TreeIG extends the Integrated Gradients framework of Sundararajan, Taly, and Yan (2017) to tree ensembles by exploiting the piecewise-constant structure of tree models.
+
+TreeIG uses generalized gradients to extend Integrated Gradients to tree-based models. The integrals of the generalized gradients are exactly equal to the sum of the prediction steps along the input path. TreeIG uses this equivalence to efficiently compute Integrated Gradients for tree models. 
 
 ## References
+
+TreeIG:
+
+- Hentschel, Ludger. 2026. 
+  "TreeIG: Exact Integrated Gradients for Tree-Based Models."
+  *www.ludgerhentschel.com/Research.html*
 
 Integrated Gradients:
 
