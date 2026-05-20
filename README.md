@@ -100,7 +100,7 @@ TreeIG and TreeSHAP answer different attribution questions and generally
 produce different decompositions. Neither dominates the other.
 
 **TreeIG** answers: *"How much does feature j contribute to the change in
-prediction as we move continuously from baseline x₀ to observation x?"*
+prediction as we move continuously from baseline `x0` to observation `x`?"*
 Attribution is the integral of partial derivatives along the path from `x0`
 to `x`. For piecewise-constant trees this integral reduces exactly to a sum of
 prediction jumps at split boundaries crossed along the path.
