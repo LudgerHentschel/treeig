@@ -4,7 +4,7 @@ TreeIG computes exact Integrated Gradients for tree ensembles. It decomposes the
 
 For each observation, TreeIG returns feature attributions $\phi_j$ satisfying
 
-$$\sum_j \phi_j = F(x) - F(x_0)$$
+$$\sum_j \phi_j = F(x) - F(x_0),$$
 
 where $F$ is the scalar model output being explained. For regression models, $F$ is the prediction. For supported classifiers, $F$ is the raw margin/logit, not the predicted probability.
 
@@ -30,9 +30,7 @@ zero almost everywhere and undefined at split boundaries.
 
 TreeIG uses the tree structure directly. Along the interpolation path
 
-```text
-x(t) = x0 + t * (x - x0),    0 <= t <= 1,
-```
+$$ x(t) = x0 + t * (x - x0),\qquad    0 \le t \le 1, $$
 
 a tree prediction changes only when the path crosses a split threshold.
 TreeIG finds those crossings exactly and assigns each prediction jump to the
@@ -61,15 +59,18 @@ Standard numerical Integrated Gradients methods try to approximate these impulse
 TreeIG and TreeSHAP answer different attribution questions and generally
 produce different decompositions. Neither dominates the other.
 
-**TreeIG** answers: *"How much does feature $j$ contribute to the change in
-prediction as we move continuously from baseline $x_0$ to observation $x$?"*
-Attribution is the integral of partial derivatives along the path from $x_0$
+**TreeIG** answers: "How much does feature $j$ contribute to the change in
+prediction as we move continuously from baseline $x_0$ to observation $x$?"
+
+- Attribution is the integral of partial derivatives along the path from $x_0$
 to $x$. For piecewise-constant trees this integral reduces exactly to a sum of
 prediction jumps at split boundaries crossed along the path.
 
-**TreeSHAP** answers: *"How much does feature $j$ individually shift the
+**TreeSHAP** answers: "How much does feature $j$ individually shift the
 expected prediction, averaged over all possible subsets of the other
-features?"* Attribution is an average of discrete inclusion effects, where
+features?" 
+
+- Attribution is an average of discrete inclusion effects, where
 absent features are marginalized out over a background dataset. There is no
 path and no baseline input; the reference point is the average prediction over
 the background distribution.
