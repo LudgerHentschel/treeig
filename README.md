@@ -366,4 +366,4 @@ Future extensions may include:
 - CatBoost support, which requires customized analysis of oblivious trees
   and categorical split structure;
 - alternative allocation rules for simultaneous multi-feature effects at
-  coincident split crossings.
+  generally rare coincident split crossings.
