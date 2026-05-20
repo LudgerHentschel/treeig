@@ -12,7 +12,7 @@ where $F$ is the scalar model output being explained. For regression models, $F$
 
 TreeIG extends the Integrated Gradients framework of Sundararajan, Taly, and Yan (2017) to tree ensembles by exploiting the piecewise-constant structure of tree models.
 
-TreeIG uses generalized gradients to extend Integrated Gradients to tree-based models. The integrals of the generalized gradients are exactly equal to the sum of the prediction steps along the input path. TreeIG uses this equivalence to efficiently compute Integrated Gradients for tree models. 
+TreeIG uses distributional gradients to extend Integrated Gradients to tree-based models. The integrals of the distributional gradients are exactly equal to the sum of the prediction steps along the input path. TreeIG uses this equivalence to efficiently compute Integrated Gradients for tree models. 
 
 ## Using TreeIG
 
@@ -79,6 +79,20 @@ This gives an exact additive decomposition for tree models without
 numerical quadrature.
 
 For smooth models, TreeIG reduces to ordinary Integrated Gradients. For tree models, TreeIG computes the exact path decomposition implied by split crossings.
+
+### Distributional intuition
+
+For tree models, the prediction along the interpolation path is piecewise constant. The prediction changes only when the path crosses a split threshold.
+
+TreeIG interprets these jumps using generalized (distributional) derivatives. A split crossing produces a localized impulse whose integral is exactly equal to the prediction jump.
+
+<p align="center">
+  <img src="docs/Figure_TreeGradient.svg" width="700">
+</p>
+
+The top panel shows a step in the tree prediction along the interpolation path. The middle panel shows the corresponding distributional derivative: zero everywhere except at the split crossing. The bottom panel shows that the path integral localizes exactly at the crossing and recovers the prediction jump.
+
+Standard numerical Integrated Gradients methods approximate these localized impulses using dense interpolation grids and numerical gradient approximations. TreeIG instead computes the split-crossing contributions analytically from the fitted tree structure, yielding exact additive attributions for tree models.
 
 ## Relation to SHAP and TreeSHAP
 

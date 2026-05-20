@@ -33,3 +33,4 @@ preferred-citation:
       given-names: "Ludger"
   title: "TreeIG: Exact Integrated Gradients for Tree-Based Models"
   year: 2026
+  url: https://github.com/LudgerHentschel/treeig
