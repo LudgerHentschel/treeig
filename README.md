@@ -12,6 +12,8 @@ Integrated Gradients (Sundararajan, Taly, and Yan, 2017) defines feature attribu
 
 At first glance, Integrated Gradients appears mismatched with piecewise-constant tree models: gradients vanish almost everywhere and are undefined at split boundaries. The path-integral formulation resolves this. Rather than introducing numerical approximation error through quadrature, the tree structure permits an exact finite decomposition in which the attribution reduces to the sum of prediction jumps at split boundaries crossed along the integration path. The result is exact — no Monte Carlo sampling, no numerical quadrature, no approximation parameters.
 
+Because TreeIG replaces numerical quadrature and sampling with a finite sum over split crossings, it is fast in practice. For many real-world models — hundreds of trees, hundreds of features, thousands of observations — attribution completes in under a millisecond on a modern laptop. (See the example notebook for timings.) For many typical use cases TreeIG is faster than TreeSHAP, which is itself considered fast.
+
 ## Using TreeIG
 
 TreeIG follows a familiar explainer pattern:
@@ -58,11 +60,11 @@ Standard numerical Integrated Gradients methods try to approximate these impulse
 
 TreeIG and TreeSHAP answer different attribution questions and generally produce different decompositions. Neither dominates the other.
 
-**TreeIG** answers: *"How much does feature $j$ contribute to the change in prediction as we move continuously from baseline $x_0$ to observation $x$?"*
+**TreeIG** answers: "How much does feature $j$ contribute to the change in prediction as we move continuously from baseline $x_0$ to observation $x$?"
 
 - Attribution is the integral of partial derivatives along the path from $x_0$ to $x$. (For piecewise-constant trees this integral reduces exactly to a sum of prediction jumps at split boundaries crossed along the path.)
 
-**TreeSHAP** answers: *"How much does feature $j$ shift the expected prediction, averaged over all possible subsets of the other features?"*
+**TreeSHAP** answers: "How much does feature $j$ shift the expected prediction, averaged over all possible subsets of the other features?"
 
 - Attribution is an average of discrete inclusion effects, where absent features are marginalized out over a background dataset. There is no path; the reference point is the expected prediction over the background distribution.
 
