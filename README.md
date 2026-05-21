@@ -49,10 +49,7 @@ of each impulse is exactly the prediction jump at that crossing.
   <img src="docs/Figure_TreeGradient.svg" width="700">
 </p>
 
-The top panel shows a step in the tree prediction along the interpolation path.
-The middle panel shows the corresponding distributional derivative: zero
-everywhere except at the split crossing. The bottom panel shows that the path
-integral localizes exactly at the crossing and recovers the prediction jump.
+The top panel shows a step in the tree prediction along the interpolation path. The middle panel shows the corresponding distributional derivative: zero everywhere except at the split crossing. (Here, $\delta(t - t^\ast)$ is the Dirac delta distribution centered at $t^\ast$.) The bottom panel shows that the path integral localizes exactly at the crossing and recovers the prediction jump.
 
 Standard numerical Integrated Gradients methods try to approximate these impulses using dense interpolation grids. TreeIG instead computes the split-crossing contributions analytically from the fitted tree structure.
 
@@ -116,7 +113,7 @@ TreeIG deliberately does not yet support:
 
 - CatBoost;
 - categorical splits;
-- missing-value routing;
+- missing-value routing (use feature augmentation for missingness);
 - probability-output attribution;
 - probability-averaging or vote-share classifiers such as
   `DecisionTreeClassifier`, `RandomForestClassifier`, and
