@@ -56,6 +56,7 @@ from .core import (
     _baseline_cache_key,
     _compute_attributions_with_y0,
     _compute_core,
+    _compute_event_traces,
     _compute_y0_per_tree,
 )
 from .dispatch import extract_tree_arrays, model_predict
@@ -312,6 +313,50 @@ class TreeIG:
 
         return phis, infos, summary
 
+    def trace(
+        self,
+        X: np.ndarray,
+        baseline: Optional[np.ndarray] = None,
+        target: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Return ordered split-crossing prediction events.
+
+        This is a low-level API for downstream scalar-functional attribution,
+        including EDEF. It returns per-observation path events, not feature
+        attribution sums.
+
+        Returned arrays are padded to a common width. For observation i, only
+        the first counts[i] entries are valid.
+        """
+        arrays = self._resolve_arrays_for_target(target)
+        b = self._resolve_baseline(baseline, arrays)
+        X_prep = self._prepare_X(X, arrays)
+        y0 = self._get_y0_per_tree(arrays, b)
+
+        counts, times, features, jumps = _compute_event_traces(
+            arrays,
+            b,
+            X_prep,
+            self.time_tol,
+            y0,
+        )
+
+        resolved_target = arrays.get("target", None)
+        baseline_prediction = self._get_baseline_prediction(arrays, b)
+        endpoint_prediction = model_predict(self.model, X_prep, resolved_target)
+
+        return {
+            "counts": counts,
+            "times": times,
+            "features": features,
+            "jumps": jumps,
+            "baseline_prediction": baseline_prediction,
+            "endpoint_prediction": endpoint_prediction,
+            "baseline": b,
+            "target": resolved_target,
+        }
+        
     def warmup(
         self,
         X: np.ndarray,
@@ -419,3 +464,4 @@ def warmup_exact_gb_ig(
 
 
 extract_gb_tree_arrays = extract_tree_arrays
+

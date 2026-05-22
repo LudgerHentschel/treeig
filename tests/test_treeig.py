@@ -616,9 +616,43 @@ def test_batch_size_matches_full_batch():
 
     with pytest.raises(ValueError):
         ig.attribute(X_eval, batch_size=0)
+
+def test_trace_reconstructs_attribute():
+    import_or_skip("sklearn")
+    from sklearn.ensemble import RandomForestRegressor
+
+    X, y = make_regression_data(seed=24)
+    baseline = finite_baseline(X)
+    X_eval = X[:25]
+
+    model = RandomForestRegressor(
+        n_estimators=6,
+        max_depth=3,
+        random_state=0,
+        n_jobs=1,
+    )
+    model.fit(X, y)
+
+    explainer = TreeIG(model, baseline=baseline).warmup(X_eval[:3])
+
+    phis = explainer.attribute(X_eval)
+    trace = explainer.trace(X_eval)
+
+    reconstructed = np.zeros_like(phis)
+
+    for i in range(X_eval.shape[0]):
+        n = trace["counts"][i]
+        for k in range(n):
+            j = trace["features"][i, k]
+            reconstructed[i, j] += trace["jumps"][i, k]
+
+    np.testing.assert_allclose(reconstructed, phis, atol=1e-10)    
+
+
 if __name__ == "__main__":
 
     import pytest
     import sys
 
     sys.exit(pytest.main(["-v", __file__]))
+

@@ -296,6 +296,219 @@ def _attribute_one_tree(
     return n_events
 
 
+@njit
+def _trace_one_tree(
+    cl,
+    cr,
+    feat,
+    thresh,
+    val,
+    left_inc,
+    round_input,
+    tree_idx,
+    x0,
+    x1,
+    dx,
+    y0_tree,
+    tree_weight,
+    time_tol,
+    out_t,
+    out_feature,
+    out_jump,
+    offset,
+    stk_node,
+    stk_tl,
+    stk_tr,
+    stk_ef,
+    seg_tl,
+    seg_val,
+    seg_ef,
+    probe,
+):
+    p = x0.shape[0]
+    n_events = 0
+
+    n_seg = _dfs_intervals(
+        cl,
+        cr,
+        feat,
+        thresh,
+        val,
+        left_inc,
+        round_input,
+        tree_idx,
+        x0,
+        dx,
+        time_tol,
+        stk_node,
+        stk_tl,
+        stk_tr,
+        stk_ef,
+        seg_tl,
+        seg_val,
+        seg_ef,
+    )
+
+    # Possible endpoint jump near t=0, matching _attribute_one_tree logic.
+    jump0 = (seg_val[0] - y0_tree) if n_seg > 0 else 0.0
+
+    if jump0 != 0.0:
+        if n_seg > 1:
+            t_probe = time_tol + 0.5 * (seg_tl[1] - time_tol)
+        else:
+            t_probe = 0.5
+
+        for jj in range(p):
+            probe[jj] = x0[jj] + t_probe * dx[jj]
+
+        j0 = _find_divergent_feature(
+            cl, cr, feat, thresh, left_inc, round_input, tree_idx, x0, probe
+        )
+
+        if j0 >= 0:
+            out_t[offset + n_events] = 0.0
+            out_feature[offset + n_events] = j0
+            out_jump[offset + n_events] = tree_weight * jump0
+            n_events += 1
+
+    # Interior split-crossing jumps.
+    for k in range(1, n_seg):
+        j = seg_ef[k]
+        jump = seg_val[k] - seg_val[k - 1]
+
+        if j >= 0 and jump != 0.0:
+            out_t[offset + n_events] = seg_tl[k]
+            out_feature[offset + n_events] = j
+            out_jump[offset + n_events] = tree_weight * jump
+            n_events += 1
+
+    # Possible endpoint jump near t=1, matching _attribute_one_tree logic.
+    y1 = _predict_leaf(cl, cr, feat, thresh, val, left_inc, round_input, tree_idx, x1)
+    jump1 = y1 - (seg_val[n_seg - 1] if n_seg > 0 else y1)
+
+    if jump1 != 0.0:
+        if n_seg > 0:
+            t_probe = 0.5 * (seg_tl[n_seg - 1] + (1.0 - time_tol))
+        else:
+            t_probe = 0.5
+
+        for jj in range(p):
+            probe[jj] = x0[jj] + t_probe * dx[jj]
+
+        j1 = _find_divergent_feature(
+            cl, cr, feat, thresh, left_inc, round_input, tree_idx, probe, x1
+        )
+
+        if j1 >= 0:
+            out_t[offset + n_events] = 1.0
+            out_feature[offset + n_events] = j1
+            out_jump[offset + n_events] = tree_weight * jump1
+            n_events += 1
+
+    return n_events
+
+
+@njit
+def _sort_events_by_time(t, feature, jump, n):
+    for a in range(1, n):
+        kt = t[a]
+        kf = feature[a]
+        kj = jump[a]
+
+        b = a - 1
+        while b >= 0 and t[b] > kt:
+            t[b + 1] = t[b]
+            feature[b + 1] = feature[b]
+            jump[b + 1] = jump[b]
+            b -= 1
+
+        t[b + 1] = kt
+        feature[b + 1] = kf
+        jump[b + 1] = kj
+
+
+@njit(parallel=True)
+def _trace_batch(
+    cl,
+    cr,
+    feat,
+    thresh,
+    val,
+    left_inc,
+    round_input,
+    x0,
+    X,
+    y0_per_tree,
+    tree_weight,
+    time_tol,
+):
+    n_obs = X.shape[0]
+    p = X.shape[1]
+    n_trees = cl.shape[0]
+    buf = cl.shape[1] * 2
+
+    # Conservative upper bound. Each tree can generate at most buf interior-ish
+    # events plus the two endpoint events.
+    max_events = n_trees * (buf + 2)
+
+    times = np.full((n_obs, max_events), np.nan, dtype=np.float64)
+    features = np.full((n_obs, max_events), -1, dtype=np.int64)
+    jumps = np.zeros((n_obs, max_events), dtype=np.float64)
+    counts = np.zeros(n_obs, dtype=np.int64)
+
+    dx_buf = np.empty((n_obs, p), dtype=np.float64)
+    stk_node = np.empty((n_obs, buf), dtype=np.int64)
+    stk_tl = np.empty((n_obs, buf), dtype=np.float64)
+    stk_tr = np.empty((n_obs, buf), dtype=np.float64)
+    stk_ef = np.empty((n_obs, buf), dtype=np.int64)
+    seg_tl = np.empty((n_obs, buf), dtype=np.float64)
+    seg_val = np.empty((n_obs, buf), dtype=np.float64)
+    seg_ef = np.empty((n_obs, buf), dtype=np.int64)
+    probe = np.empty((n_obs, p), dtype=np.float64)
+
+    for i in prange(n_obs):
+        for j in range(p):
+            dx_buf[i, j] = X[i, j] - x0[j]
+
+        n_events_i = 0
+
+        for m in range(n_trees):
+            n_new = _trace_one_tree(
+                cl,
+                cr,
+                feat,
+                thresh,
+                val,
+                left_inc,
+                round_input,
+                m,
+                x0,
+                X[i],
+                dx_buf[i],
+                y0_per_tree[m],
+                tree_weight[m],
+                time_tol,
+                times[i],
+                features[i],
+                jumps[i],
+                n_events_i,
+                stk_node[i],
+                stk_tl[i],
+                stk_tr[i],
+                stk_ef[i],
+                seg_tl[i],
+                seg_val[i],
+                seg_ef[i],
+                probe[i],
+            )
+            n_events_i += n_new
+
+        _sort_events_by_time(times[i], features[i], jumps[i], n_events_i)
+        counts[i] = n_events_i
+
+    return counts, times, features, jumps
+
+
 @njit(parallel=True)
 def _compute_batch(
     cl,
@@ -416,6 +629,38 @@ def _compute_y0_per_tree(arrays: Dict[str, Any], baseline: np.ndarray) -> np.nda
     li = arrays["left_inclusive"]
     ri = _round_input_array(arrays)
     return _baseline_leaf_values(cl, cr, ft, th, va, li, ri, baseline)
+
+
+def _compute_event_traces(
+    arrays: Dict[str, Any],
+    baseline: np.ndarray,
+    X: np.ndarray,
+    time_tol: float,
+    y0_per_tree: np.ndarray,
+):
+    cl = arrays["children_left"]
+    cr = arrays["children_right"]
+    ft = arrays["feature"]
+    th = arrays["threshold"]
+    va = arrays["value"]
+    li = arrays["left_inclusive"]
+    ri = _round_input_array(arrays)
+    tw = arrays["tree_weight"]
+
+    return _trace_batch(
+        cl,
+        cr,
+        ft,
+        th,
+        va,
+        li,
+        ri,
+        baseline,
+        X,
+        y0_per_tree,
+        tw,
+        time_tol,
+    )
 
 
 def _compute_core(
