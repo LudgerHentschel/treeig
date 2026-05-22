@@ -536,6 +536,86 @@ def test_simultaneous_crossing_completeness_first_policy():
 
     assert_completeness(model, X_eval, x0, target=None, atol=1e-10, rtol=1e-10)
 
+
+def test_sklearn_gradient_boosting_classifier_subclass_uses_decision_function():
+    import_or_skip("sklearn")
+    from sklearn.ensemble import GradientBoostingClassifier
+
+    class MyGradientBoostingClassifier(GradientBoostingClassifier):
+        pass
+
+    X, y = make_binary_classification_data(seed=21)
+    x0 = finite_baseline(X)
+    X_eval = X[:20]
+
+    model = MyGradientBoostingClassifier(
+        n_estimators=10,
+        max_depth=2,
+        learning_rate=0.07,
+        random_state=0,
+    )
+    model.fit(X, y)
+
+    ig = TreeIG(model, baseline=x0, target=1).warmup(X_eval[:3])
+    phi, infos, _ = ig.explain(X_eval, target=1)
+    endpoint_delta = np.array([d["endpoint_delta"] for d in infos], dtype=float)
+
+    expected = model.decision_function(X_eval) - model.decision_function(x0.reshape(1, -1))[0]
+    np.testing.assert_allclose(endpoint_delta, expected, atol=2e-8, rtol=2e-8)
+    np.testing.assert_allclose(phi.sum(axis=1), expected, atol=2e-8, rtol=2e-8)
+
+
+def test_backend_round_input_flags_are_backend_specific():
+    import_or_skip("sklearn")
+    from sklearn.ensemble import GradientBoostingRegressor
+
+    X, y = make_regression_data(seed=22)
+    model = GradientBoostingRegressor(n_estimators=4, max_depth=2, random_state=0).fit(X, y)
+    ig = TreeIG(model, baseline=finite_baseline(X))
+    assert not np.asarray(ig._arrays["round_input"], dtype=bool).any()
+
+    xgb = pytest.importorskip("xgboost")
+    model_xgb = xgb.XGBRegressor(
+        n_estimators=4,
+        max_depth=2,
+        objective="reg:squarederror",
+        random_state=0,
+        n_jobs=1,
+        verbosity=0,
+    ).fit(X, y)
+    ig_xgb = TreeIG(model_xgb, baseline=finite_baseline(X))
+    assert np.asarray(ig_xgb._arrays["round_input"], dtype=bool).any()
+
+
+def test_batch_size_matches_full_batch():
+    import_or_skip("sklearn")
+    from sklearn.ensemble import RandomForestRegressor
+
+    X, y = make_regression_data(seed=23)
+    x0 = finite_baseline(X)
+    X_eval = X[:35]
+
+    model = RandomForestRegressor(
+        n_estimators=6,
+        max_depth=3,
+        random_state=0,
+        n_jobs=1,
+    ).fit(X, y)
+
+    ig = TreeIG(model, baseline=x0).warmup(X_eval[:3])
+    phi_full, infos_full, summary_full = ig.explain(X_eval)
+    phi_chunk, infos_chunk, summary_chunk = ig.explain(X_eval, batch_size=7)
+
+    np.testing.assert_allclose(phi_chunk, phi_full, atol=0.0, rtol=0.0)
+    assert [d["n_events"] for d in infos_chunk] == [d["n_events"] for d in infos_full]
+    assert summary_chunk == summary_full
+
+    phi_attr_full = ig.attribute(X_eval)
+    phi_attr_chunk = ig.attribute(X_eval, batch_size=7)
+    np.testing.assert_allclose(phi_attr_chunk, phi_attr_full, atol=0.0, rtol=0.0)
+
+    with pytest.raises(ValueError):
+        ig.attribute(X_eval, batch_size=0)
 if __name__ == "__main__":
 
     import pytest

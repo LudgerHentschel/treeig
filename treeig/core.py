@@ -147,7 +147,10 @@ def _dfs_intervals(
 
         t_cross = (c - x0[j]) / d
 
-        if tl + time_tol < t_cross < tr - time_tol and time_tol < t_cross < 1.0 - time_tol:
+        # The active interval [tl, tr] is always contained in [0, 1].
+        # A strict interior crossing is therefore fully characterized by
+        # the current interval bounds.
+        if tl + time_tol < t_cross < tr - time_tol:
             cb = lc if d > 0.0 else rc
             ca = rc if d > 0.0 else lc
 
@@ -312,6 +315,8 @@ def _compute_batch(
     n_obs = X.shape[0]
     p = X.shape[1]
     n_trees = cl.shape[0]
+    # DFS stack and segment buffers are each bounded by max_nodes for a
+    # binary tree path partition; use one shared 2 * max_nodes scratch width.
     buf = cl.shape[1] * 2
 
     phis = np.zeros((n_obs, p), dtype=np.float64)

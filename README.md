@@ -32,7 +32,7 @@ zero almost everywhere and undefined at split boundaries.
 
 TreeIG uses the tree structure directly. Along the interpolation path
 
-$$ x(t) = x0 + t * (x - x0),\qquad    0 \le t \le 1, $$
+$$ x(t) = x0 + t \cdot (x - x0),\qquad    0 \le t \le 1, $$
 
 a tree prediction changes only when the path crosses a split threshold.
 TreeIG finds those crossings exactly and assigns each prediction jump to the

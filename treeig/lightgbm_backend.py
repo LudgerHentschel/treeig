@@ -155,7 +155,7 @@ def _extract_lightgbm_booster(model: Any, target: Optional[int]) -> Dict[str, An
     threshold = np.zeros((n_trees, max_nodes), dtype=np.float64)
     value = np.zeros((n_trees, max_nodes), dtype=np.float64)
     left_inclusive = np.ones((n_trees, max_nodes), dtype=np.bool_)
-    round_input = np.ones((n_trees, max_nodes), dtype=np.bool_)
+    round_input = np.zeros((n_trees, max_nodes), dtype=np.bool_)
 
     for m, nodes in enumerate(flattened):
         for node_idx, rec in enumerate(nodes):
@@ -180,7 +180,7 @@ def _extract_lightgbm_booster(model: Any, target: Optional[int]) -> Dict[str, An
             threshold[m, node_idx] = float(node["threshold"])
             value[m, node_idx] = 0.0
             left_inclusive[m, node_idx] = True
-            round_input[m, node_idx] = True
+            round_input[m, node_idx] = False
 
     n_features = _lightgbm_num_features(model, booster)
     backend = "lightgbm_" + (kind if kind != "sklearn_like" else "model")

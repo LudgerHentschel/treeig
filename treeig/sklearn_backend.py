@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from .utils import _ResolvedTarget, _resolve_binary_classifier_target
+from .utils import _resolve_binary_classifier_target
 
 
 def _pack_sklearn_tree_objects(
@@ -34,7 +34,7 @@ def _pack_sklearn_tree_objects(
     threshold = np.zeros((n_trees, max_nodes), dtype=np.float64)
     value = np.zeros((n_trees, max_nodes), dtype=np.float64)
     left_inclusive = np.ones((n_trees, max_nodes), dtype=np.bool_)
-    round_input = np.ones((n_trees, max_nodes), dtype=np.bool_)
+    round_input = np.zeros((n_trees, max_nodes), dtype=np.bool_)
 
     for m, tree in enumerate(trees):
         tr = tree.tree_
@@ -175,9 +175,11 @@ def _extract_sklearn_gradient_boosting_classifier(
 
 
 def _predict_sklearn_model(model: Any, X: np.ndarray, target: Optional[int]) -> np.ndarray:
+    from sklearn.ensemble import GradientBoostingClassifier
+
     from .utils import _select_prediction_target
 
-    if hasattr(model, "decision_function") and type(model).__name__ == "GradientBoostingClassifier":
+    if isinstance(model, GradientBoostingClassifier):
         pred = model.decision_function(X)
         return _select_prediction_target(pred, target)
 

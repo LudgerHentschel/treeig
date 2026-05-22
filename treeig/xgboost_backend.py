@@ -42,6 +42,8 @@ def _xgboost_raw_json(booster: Any) -> Dict[str, Any]:
         os.close(fd)
         try:
             booster.save_model(path)
+            if os.path.getsize(path) == 0:
+                raise RuntimeError("XGBoost save_model produced an empty JSON file.")
             with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
         finally:
@@ -244,32 +246,30 @@ def _extract_xgboost_booster(model: Any, target: Optional[int]) -> Dict[str, Any
                 "categorical splits are not yet supported."
             )
 
-        for node in range(n_nodes):
-            lc = int(left_children[node])
-            rc = int(right_children[node])
+        leaf_mask = (left_children == -1) & (right_children == -1)
+        internal_mask = ~leaf_mask
 
-            if lc == -1 and rc == -1:
-                children_left[m, node] = -1
-                children_right[m, node] = -1
+        if np.any((left_children[internal_mask] < 0) | (right_children[internal_mask] < 0)):
+            raise ValueError(
+                "Malformed XGBoost tree: internal node has a missing child."
+            )
 
-                leaf_val = float(split_conditions[node])
-                if not np.isfinite(leaf_val):
-                    leaf_val = float(base_weights[node])
-                value[m, node] = leaf_val
-                continue
+        node_slice = slice(0, n_nodes)
 
-            if lc < 0 or rc < 0:
-                raise ValueError(
-                    "Malformed XGBoost tree: internal node has a missing child."
-                )
+        children_left[m, node_slice][internal_mask] = left_children[internal_mask]
+        children_right[m, node_slice][internal_mask] = right_children[internal_mask]
+        feature[m, node_slice][internal_mask] = split_indices[internal_mask]
+        threshold[m, node_slice][internal_mask] = np.asarray(
+            split_conditions[internal_mask],
+            dtype=np.float32,
+        ).astype(np.float64)
+        left_inclusive[m, node_slice][internal_mask] = False
+        round_input[m, node_slice][internal_mask] = True
 
-            children_left[m, node] = lc
-            children_right[m, node] = rc
-            feature[m, node] = int(split_indices[node])
-            threshold[m, node] = float(np.float32(split_conditions[node]))
-            value[m, node] = 0.0
-            left_inclusive[m, node] = False
-            round_input[m, node] = True
+        leaf_values = split_conditions.copy()
+        bad_leaf = leaf_mask & ~np.isfinite(leaf_values)
+        leaf_values[bad_leaf] = base_weights[bad_leaf]
+        value[m, node_slice][leaf_mask] = leaf_values[leaf_mask]
 
     backend = "xgboost_" + (kind if kind != "sklearn_like" else "model")
 

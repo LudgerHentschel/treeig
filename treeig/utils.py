@@ -28,7 +28,7 @@ def _check_finite_numeric(X: np.ndarray, name: str) -> None:
 
 def _as_float32_float64(X: np.ndarray) -> np.ndarray:
     """Round through float32 while returning a float64 array for Numba kernels."""
-    return np.asarray(X, dtype=np.float64).astype(np.float32).astype(np.float64)
+    return np.asarray(X, dtype=np.float32).astype(np.float64)
 
 
 def _resolve_binary_classifier_target(target: Optional[int]) -> _ResolvedTarget:
