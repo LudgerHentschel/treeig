@@ -114,10 +114,10 @@ TreeIG deliberately does not yet support:
 - CatBoost;
 - categorical splits;
 - missing-value routing (use feature augmentation for missingness);
-- probability-output attribution;
+- probability-output attribution (because probability attribution is not additive);
 - probability-averaging or vote-share classifiers such as
   `DecisionTreeClassifier`, `RandomForestClassifier`, and
-  `ExtraTreesClassifier`.
+  `ExtraTreesClassifier` (because the produce probabilities, not scores).
 
 ## Installation
 
