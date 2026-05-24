@@ -58,7 +58,8 @@ from .core import (
     _compute_core,
     _compute_event_traces,
     _compute_y0_per_tree,
-    _loss_reduction_batch, 
+    _loss_reduction_batch,
+    _loss_reduction_multiclass_from_traces_batch, 
 )
 from .dispatch import extract_tree_arrays, model_predict
 from .utils import _as_float32_float64, _as_target_key, _check_finite_numeric
@@ -417,6 +418,109 @@ class TreeIG:
             "loss": loss,
         }
         
+    def multiclass_loss_attribution(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        baseline: Optional[np.ndarray] = None,
+        n_classes: Optional[int] = None,
+    ) -> Dict[str, Any]:
+
+        X_prep = self._prepare_X(X)
+        y_arr = np.asarray(y, dtype=np.int64).reshape(-1)
+
+        if y_arr.shape[0] != X_prep.shape[0]:
+            raise ValueError("y and X must have the same number of observations.")
+
+        if np.any(y_arr < 0):
+            raise ValueError("y must contain nonnegative class labels.")
+
+        if n_classes is None:
+            classes = getattr(self.model, "classes_", None)
+
+            if classes is None:
+                raise ValueError(
+                    "n_classes must be provided if model has no classes_."
+                )
+
+            n_classes = int(len(classes))
+
+        baseline_scores = np.empty(n_classes, dtype=np.float64)
+        endpoint_scores = np.empty(
+            (X_prep.shape[0], n_classes),
+            dtype=np.float64,
+        )
+
+        trace_list = []
+
+        for k in range(n_classes):
+            arrays_k = self._resolve_arrays_for_target(k)
+            b_k = self._resolve_baseline(baseline, arrays_k)
+            y0_k = self._get_y0_per_tree(arrays_k, b_k)
+
+            counts_k, times_k, features_k, jumps_k = _compute_event_traces(
+                arrays_k,
+                b_k,
+                X_prep,
+                self.time_tol,
+                y0_k,
+            )
+
+            baseline_scores[k] = self._get_baseline_prediction(arrays_k, b_k)
+
+            endpoint_scores[:, k] = model_predict(
+                self.model,
+                X_prep,
+                k,
+            )
+
+            trace_list.append(
+                (
+                    counts_k,
+                    times_k,
+                    features_k,
+                    jumps_k,
+                )
+            )
+
+        counts = np.stack([x[0] for x in trace_list], axis=0)
+        times = np.stack([x[1] for x in trace_list], axis=0)
+        features = np.stack([x[2] for x in trace_list], axis=0)
+        jumps = np.stack([x[3] for x in trace_list], axis=0)
+
+        (
+            observation_values,
+            baseline_losses,
+            model_losses,
+        ) = _loss_reduction_multiclass_from_traces_batch(
+            counts,
+            times,
+            features,
+            jumps,
+            y_arr,
+            baseline_scores,
+            endpoint_scores,
+            X_prep.shape[1],
+        )
+
+        values = observation_values.mean(axis=0)
+
+        return {
+            "observation_values": observation_values,
+            "values": values,
+            "standard_errors": (
+                observation_values.std(axis=0, ddof=1)
+                / np.sqrt(X_prep.shape[0])
+            ),
+            "baseline_loss": float(np.mean(baseline_losses)),
+            "model_loss": float(np.mean(model_losses)),
+            "total": float(
+                np.mean(baseline_losses) - np.mean(model_losses)
+            ),
+            "loss": "multiclass_log_loss",
+        }
+
+
     def warmup(
         self,
         X: np.ndarray,

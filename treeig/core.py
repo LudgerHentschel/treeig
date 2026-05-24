@@ -908,3 +908,129 @@ def _loss_reduction_batch(
         time_tol,
         loss_code,
     )
+    
+@njit
+def _logsumexp_numba(scores):
+    n_classes = scores.shape[0]
+    zmax = scores[0]
+
+    for k in range(1, n_classes):
+        if scores[k] > zmax:
+            zmax = scores[k]
+
+    total = 0.0
+
+    for k in range(n_classes):
+        total += np.exp(scores[k] - zmax)
+
+    return zmax + np.log(total)
+
+
+@njit
+def _multiclass_log_loss_numba(y_i, scores):
+    return _logsumexp_numba(scores) - scores[int(y_i)]
+
+
+@njit
+def _sort_multiclass_events_by_time_class_feature(t, cls, feature, jump, n):
+    for a in range(1, n):
+        kt = t[a]
+        kc = cls[a]
+        kf = feature[a]
+        kj = jump[a]
+
+        b = a - 1
+
+        while b >= 0:
+            move = False
+
+            if t[b] > kt:
+                move = True
+            elif t[b] == kt:
+                if cls[b] > kc:
+                    move = True
+                elif cls[b] == kc and feature[b] > kf:
+                    move = True
+
+            if not move:
+                break
+
+            t[b + 1] = t[b]
+            cls[b + 1] = cls[b]
+            feature[b + 1] = feature[b]
+            jump[b + 1] = jump[b]
+            b -= 1
+
+        t[b + 1] = kt
+        cls[b + 1] = kc
+        feature[b + 1] = kf
+        jump[b + 1] = kj
+
+
+@njit(parallel=True)
+def _loss_reduction_multiclass_from_traces_batch(
+    counts,
+    times,
+    features,
+    jumps,
+    y,
+    baseline_scores,
+    endpoint_scores,
+    n_features,
+):
+    n_classes = counts.shape[0]
+    n_obs = counts.shape[1]
+    max_events_per_class = times.shape[2]
+    max_total_events = n_classes * max_events_per_class
+
+    observation_values = np.zeros((n_obs, n_features), dtype=np.float64)
+    baseline_losses = np.empty(n_obs, dtype=np.float64)
+    model_losses = np.empty(n_obs, dtype=np.float64)
+
+    event_t = np.empty((n_obs, max_total_events), dtype=np.float64)
+    event_class = np.empty((n_obs, max_total_events), dtype=np.int64)
+    event_feature = np.empty((n_obs, max_total_events), dtype=np.int64)
+    event_jump = np.empty((n_obs, max_total_events), dtype=np.float64)
+    current_scores = np.empty((n_obs, n_classes), dtype=np.float64)
+
+    for i in prange(n_obs):
+        for k in range(n_classes):
+            current_scores[i, k] = baseline_scores[k]
+
+        n_events_i = 0
+
+        for k in range(n_classes):
+            n_k = counts[k, i]
+
+            for m in range(n_k):
+                event_t[i, n_events_i] = times[k, i, m]
+                event_class[i, n_events_i] = k
+                event_feature[i, n_events_i] = features[k, i, m]                
+                event_jump[i, n_events_i] = jumps[k, i, m]
+                n_events_i += 1
+
+        _sort_multiclass_events_by_time_class_feature(
+            event_t[i],
+            event_class[i],
+            event_feature[i],
+            event_jump[i],
+            n_events_i,
+        )
+
+        baseline_losses[i] = _multiclass_log_loss_numba(y[i], current_scores[i])
+
+        for m in range(n_events_i):
+            class_index = event_class[i, m]
+            feature_index = event_feature[i, m]
+            jump = event_jump[i, m]
+
+            before_loss = _multiclass_log_loss_numba(y[i], current_scores[i])
+            current_scores[i, class_index] += jump
+            after_loss = _multiclass_log_loss_numba(y[i], current_scores[i])
+
+            if feature_index >= 0:
+                observation_values[i, feature_index] += before_loss - after_loss
+
+        model_losses[i] = _multiclass_log_loss_numba(y[i], endpoint_scores[i])
+
+    return observation_values, baseline_losses, model_losses    
