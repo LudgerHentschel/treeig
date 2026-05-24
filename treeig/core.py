@@ -703,3 +703,208 @@ def _compute_core(
     }
 
     return phis, infos, summary
+
+@njit
+def _squared_error_loss_numba(y, pred):
+    err = y - pred
+    return err * err
+
+
+@njit
+def _sigmoid_numba(z):
+    if z >= 0.0:
+        ez = np.exp(-z)
+        return 1.0 / (1.0 + ez)
+
+    ez = np.exp(z)
+    return ez / (1.0 + ez)
+
+
+@njit
+def _binary_log_loss_numba(y, margin):
+    p = _sigmoid_numba(margin)
+
+    if p < 1e-12:
+        p = 1e-12
+    elif p > 1.0 - 1e-12:
+        p = 1.0 - 1e-12
+
+    return -(y * np.log(p) + (1.0 - y) * np.log(1.0 - p))
+
+
+@njit(parallel=True)
+def _loss_reduction_scalar_batch(
+    cl,
+    cr,
+    feat,
+    thresh,
+    val,
+    left_inc,
+    round_input,
+    x0,
+    X,
+    y,
+    y0_per_tree,
+    tree_weight,
+    baseline_prediction,
+    endpoint_prediction,
+    time_tol,
+    loss_code,
+):
+    n_obs = X.shape[0]
+    p = X.shape[1]
+    n_trees = cl.shape[0]
+    buf = cl.shape[1] * 2
+    max_events = n_trees * (buf + 2)
+
+    observation_values = np.zeros((n_obs, p), dtype=np.float64)
+
+    dx_buf = np.empty((n_obs, p), dtype=np.float64)
+    times = np.empty((n_obs, max_events), dtype=np.float64)
+    features = np.empty((n_obs, max_events), dtype=np.int64)
+    jumps = np.empty((n_obs, max_events), dtype=np.float64)
+
+    stk_node = np.empty((n_obs, buf), dtype=np.int64)
+    stk_tl = np.empty((n_obs, buf), dtype=np.float64)
+    stk_tr = np.empty((n_obs, buf), dtype=np.float64)
+    stk_ef = np.empty((n_obs, buf), dtype=np.int64)
+    seg_tl = np.empty((n_obs, buf), dtype=np.float64)
+    seg_val = np.empty((n_obs, buf), dtype=np.float64)
+    seg_ef = np.empty((n_obs, buf), dtype=np.int64)
+    probe = np.empty((n_obs, p), dtype=np.float64)
+
+    for i in prange(n_obs):
+        for j in range(p):
+            dx_buf[i, j] = X[i, j] - x0[j]
+
+        n_events_i = 0
+
+        for m in range(n_trees):
+            n_new = _trace_one_tree(
+                cl,
+                cr,
+                feat,
+                thresh,
+                val,
+                left_inc,
+                round_input,
+                m,
+                x0,
+                X[i],
+                dx_buf[i],
+                y0_per_tree[m],
+                tree_weight[m],
+                time_tol,
+                times[i],
+                features[i],
+                jumps[i],
+                n_events_i,
+                stk_node[i],
+                stk_tl[i],
+                stk_tr[i],
+                stk_ef[i],
+                seg_tl[i],
+                seg_val[i],
+                seg_ef[i],
+                probe[i],
+            )
+            n_events_i += n_new
+
+        _sort_events_by_time(times[i], features[i], jumps[i], n_events_i)
+
+        pred_before = baseline_prediction
+
+        for k in range(n_events_i):
+            feature_index = features[i, k]
+            jump = jumps[i, k]
+            pred_after = pred_before + jump
+
+            if loss_code == 0:
+                contribution = (
+                    _squared_error_loss_numba(y[i], pred_before)
+                    - _squared_error_loss_numba(y[i], pred_after)
+                )
+            else:
+                contribution = (
+                    _binary_log_loss_numba(y[i], pred_before)
+                    - _binary_log_loss_numba(y[i], pred_after)
+                )
+
+            if feature_index >= 0:
+                observation_values[i, feature_index] += contribution
+
+            pred_before = pred_after
+
+    baseline_losses = np.empty(n_obs, dtype=np.float64)
+    model_losses = np.empty(n_obs, dtype=np.float64)
+
+    for i in prange(n_obs):
+        if loss_code == 0:
+            baseline_losses[i] = _squared_error_loss_numba(
+                y[i],
+                baseline_prediction,
+            )
+            model_losses[i] = _squared_error_loss_numba(
+                y[i],
+                endpoint_prediction[i],
+            )
+        else:
+            baseline_losses[i] = _binary_log_loss_numba(
+                y[i],
+                baseline_prediction,
+            )
+            model_losses[i] = _binary_log_loss_numba(
+                y[i],
+                endpoint_prediction[i],
+            )
+
+    return observation_values, baseline_losses, model_losses
+
+
+def _loss_reduction_batch(
+    arrays: Dict[str, Any],
+    baseline: np.ndarray,
+    X: np.ndarray,
+    y: np.ndarray,
+    time_tol: float,
+    y0_per_tree: np.ndarray,
+    baseline_prediction: float,
+    endpoint_prediction: np.ndarray,
+    loss: str,
+):
+    if loss == "squared_error":
+        loss_code = 0
+    elif loss == "log_loss":
+        loss_code = 1
+    else:
+        raise NotImplementedError(
+            "Only squared_error and binary log_loss are implemented."
+        )
+
+    cl = arrays["children_left"]
+    cr = arrays["children_right"]
+    ft = arrays["feature"]
+    th = arrays["threshold"]
+    va = arrays["value"]
+    li = arrays["left_inclusive"]
+    ri = _round_input_array(arrays)
+    tw = arrays["tree_weight"]
+
+    return _loss_reduction_scalar_batch(
+        cl,
+        cr,
+        ft,
+        th,
+        va,
+        li,
+        ri,
+        baseline,
+        X,
+        y,
+        y0_per_tree,
+        tw,
+        baseline_prediction,
+        endpoint_prediction,
+        time_tol,
+        loss_code,
+    )

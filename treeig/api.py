@@ -58,6 +58,7 @@ from .core import (
     _compute_core,
     _compute_event_traces,
     _compute_y0_per_tree,
+    _loss_reduction_batch, 
 )
 from .dispatch import extract_tree_arrays, model_predict
 from .utils import _as_float32_float64, _as_target_key, _check_finite_numeric
@@ -356,6 +357,65 @@ class TreeIG:
             "baseline": b,
             "target": resolved_target,
         }
+    
+    def loss_attribution(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        baseline: Optional[np.ndarray] = None,
+        loss: str = "squared_error",
+        target: Optional[int] = None,
+        batch_size: Optional[int] = None,
+    ) -> Dict[str, Any]:
+
+        if loss not in {"squared_error", "log_loss"}:
+            raise NotImplementedError(
+                "Only squared_error and binary log_loss are implemented initially."
+            )
+    
+        arrays = self._resolve_arrays_for_target(target)
+        b = self._resolve_baseline(baseline, arrays)
+        X_prep = self._prepare_X(X, arrays)
+        y_arr = np.asarray(y, dtype=np.float64).reshape(-1)
+    
+        if loss == "log_loss":
+            if not np.all((y_arr == 0.0) | (y_arr == 1.0)):
+                raise ValueError(
+                    "For log_loss, y must contain only binary labels in {0, 1}."
+                )
+
+        if y_arr.shape[0] != X_prep.shape[0]:
+            raise ValueError("y and X must have the same number of observations.")
+    
+        y0 = self._get_y0_per_tree(arrays, b)
+    
+        resolved_target = arrays.get("target", None)
+        baseline_prediction = self._get_baseline_prediction(arrays, b)
+        endpoint_prediction = model_predict(self.model, X_prep, resolved_target)
+    
+        obs_values, baseline_losses, model_losses = _loss_reduction_batch(
+            arrays,
+            b,
+            X_prep,
+            y_arr,
+            self.time_tol,
+            y0,
+            baseline_prediction,
+            endpoint_prediction,
+            loss,
+        )
+    
+        return {
+            "observation_values": obs_values,
+            "values": obs_values.mean(axis=0),
+            "standard_errors": obs_values.std(axis=0, ddof=1) / np.sqrt(X_prep.shape[0]),
+            "baseline_loss": float(np.mean(baseline_losses)),
+            "model_loss": float(np.mean(model_losses)),
+            "total": float(np.mean(baseline_losses) - np.mean(model_losses)),
+            "baseline_prediction": baseline_prediction,
+            "endpoint_prediction": endpoint_prediction,
+            "loss": loss,
+        }
         
     def warmup(
         self,
@@ -464,4 +524,3 @@ def warmup_exact_gb_ig(
 
 
 extract_gb_tree_arrays = extract_tree_arrays
-
