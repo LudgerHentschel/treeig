@@ -14,6 +14,14 @@ At first glance, Integrated Gradients appears mismatched with piecewise-constant
 
 Because TreeIG replaces numerical quadrature and sampling with a finite sum over split crossings, it is fast in practice. For many real-world models — hundreds of trees, hundreds of features, thousands of observations — attribution completes in under a millisecond on a modern laptop. (See the example notebook for timings.) For many typical use cases TreeIG is faster than TreeSHAP, which is itself considered fast.
 
+## Installation
+
+Requires Python ≥ 3.9, NumPy, and Numba.
+
+```bash
+pip install treeig
+```
+
 ## Using TreeIG
 
 TreeIG follows a familiar explainer pattern:
@@ -118,20 +126,6 @@ TreeIG deliberately does not yet support:
 - probability-averaging or vote-share classifiers such as
   `DecisionTreeClassifier`, `RandomForestClassifier`, and
   `ExtraTreesClassifier` (because the produce probabilities, not scores).
-
-## Installation
-
-Requires Python ≥ 3.9, NumPy, and Numba.
-
-```bash
-pip install treeig
-```
-
-Or locally:
-
-```bash
-pip install -e .
-```
 
 ## Basic usage
 
