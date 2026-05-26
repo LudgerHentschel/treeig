@@ -67,10 +67,75 @@ from .utils import _as_float32_float64, _as_target_key, _check_finite_numeric
 
 class TreeIG:
     """
-    Exact Integrated Gradients for tree-based regression and additive-score
-    classification models.
-    """
+    Exact integrated-gradient attribution for supported tree-based models.
 
+    TreeIG computes feature attributions for fitted tree ensembles by exactly
+    summing the prediction jumps encountered along the straight-line path from
+    a baseline input to each evaluation input. For supported tree models, this
+    avoids numerical quadrature and produces an additive decomposition of the
+    model-output difference.
+
+    For an input row ``x`` and baseline ``x0``, the returned attributions
+    satisfy, up to floating-point error,
+
+        attributions.sum() = f(x) - f(x0)
+
+    where ``f`` is the selected scalar model output.
+
+    Regression models use their scalar prediction output. Supported
+    classification models are attributed on raw class scores, margins, or
+    logits, not probabilities. Binary classifiers use the positive-class
+    margin by default; ``target=0`` attributes the negative of that margin.
+    Multiclass classifiers require a selected class target.
+
+    Parameters
+    ----------
+    model : object
+        Fitted supported tree-based model. Supported regression backends
+        include scikit-learn decision trees, random forests, extra-trees
+        regressors, gradient boosting regressors, XGBoost regressors and
+        boosters, and LightGBM regressors and boosters. Supported
+        classification backends are additive-score classifiers with raw
+        margin/logit outputs.
+
+    baseline : array-like of shape (n_features,), optional
+        Default baseline input ``x0``. If omitted, a baseline must be supplied
+        to methods that compute attributions.
+
+    time_tol : float, default=1e-10
+        Tolerance used when ordering path-crossing times along the straight
+        line from the baseline to each input row.
+
+    tie_policy : {"first"}, default="first"
+        Rule for coincident active split crossings. Only ``"first"`` is
+        currently implemented. The argument is reserved for future allocation
+        rules.
+
+    target : int or None, default=None
+        Scalar model-output target. For regression, use ``None`` or ``0``.
+        For binary additive-score classification, ``None`` or ``1`` selects
+        the positive-class margin and ``0`` selects the negative margin. For
+        multiclass classification, this selects the class-margin output.
+
+    Attributes
+    ----------
+    model : object
+        The fitted model passed at construction.
+
+    n_features_in_ : int
+        Number of input features expected by the extracted tree representation.
+
+    backend : str
+        Backend identifier inferred from the fitted model.
+
+    Notes
+    -----
+    TreeIG currently requires finite numeric inputs and finite numeric
+    baselines. Missing-value routing, categorical splits, probability-output
+    attribution, CatBoost models, and classifiers that average probabilities
+    or vote shares directly are not currently supported.
+    """
+    
     def __init__(
         self,
         model: Any,
@@ -79,6 +144,30 @@ class TreeIG:
         tie_policy: str = "first",
         target: Optional[int] = None,
     ):
+        """
+        Initialize a TreeIG attribution object.
+    
+        Parameters
+        ----------
+        model : object
+            Fitted supported tree-based model.
+    
+        baseline : array-like of shape (n_features,), optional
+            Default baseline input used for attribution paths. If omitted, a
+            baseline must be supplied to attribution methods.
+    
+        time_tol : float, default=1e-10
+            Tolerance used when ordering split-crossing events along the
+            attribution path.
+    
+        tie_policy : {"first"}, default="first"
+            Rule for coincident active split crossings. Only ``"first"`` is
+            currently implemented.
+    
+        target : int or None, default=None
+            Default scalar model-output target. See ``TreeIG`` for the
+            regression and classification target conventions.
+        """
         if tie_policy != "first":
             raise NotImplementedError(
                 "Only tie_policy='first' is currently implemented in the fast "
@@ -250,10 +339,55 @@ class TreeIG:
         batch_size: Optional[int] = None,
     ) -> np.ndarray:
         """
-        Compute feature attributions.
+        Compute exact feature attributions for one or more input rows.
 
-        This is the fastest public path: it does not compute residual
-        diagnostics or call model.predict().
+        This is the fastest public attribution method. It computes feature
+        attributions only and does not call ``model.predict`` to construct
+        endpoint diagnostics.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Evaluation inputs. All entries must be finite numeric values.
+
+        baseline : array-like of shape (n_features,), optional
+            Baseline input used for the path integration. If omitted, the
+            default baseline supplied at construction is used.
+
+        target : int or None, default=None
+            Scalar model-output target to attribute. If omitted, the target
+            supplied at construction is used. See ``TreeIG`` for the regression
+            and classification target conventions.
+
+        batch_size : int or None, default=None
+            Number of rows to process per batch. If ``None``, all rows are
+            processed in one call. Use a positive integer to reduce peak memory
+            use for large ``X``.
+
+        Returns
+        -------
+        attributions : ndarray of shape (n_samples, n_features)
+            Exact integrated-gradient feature attributions. For each row,
+            ``attributions[i].sum()`` equals the selected model output at
+            ``X[i]`` minus the selected model output at the baseline, up to
+            floating-point error.
+
+        Raises
+        ------
+        ValueError
+            If no baseline is available, if ``X`` has an incompatible shape,
+            or if ``X`` or the baseline contains non-finite values.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> from treeig import TreeIG
+        >>>
+        >>> x0 = np.mean(X_train, axis=0)
+        >>> explainer = TreeIG(model, baseline=x0)
+        >>> attributions = explainer.attribute(X_test)
+        >>> attributions.shape
+        (X_test.shape[0], X_test.shape[1])
         """
         arrays = self._resolve_arrays_for_target(target)
         b = self._resolve_baseline(baseline, arrays)
@@ -270,7 +404,65 @@ class TreeIG:
         target: Optional[int] = None,
         batch_size: Optional[int] = None,
     ):
-        """Compute attributions with per-observation diagnostics."""
+        """
+        Compute exact feature attributions with additivity diagnostics.
+
+        This method returns feature attributions together with per-row and
+        aggregate diagnostics comparing the attribution sums to endpoint model
+        output differences.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Evaluation inputs. All entries must be finite numeric values.
+
+        baseline : array-like of shape (n_features,), optional
+            Baseline input used for the path integration. If omitted, the
+            default baseline supplied at construction is used.
+
+        target : int or None, default=None
+            Scalar model-output target to attribute. If omitted, the target
+            supplied at construction is used.
+
+        batch_size : int or None, default=None
+            Number of rows to process per batch. If ``None``, all rows are
+            processed in one call.
+
+        Returns
+        -------
+        attributions : ndarray of shape (n_samples, n_features)
+            Exact integrated-gradient feature attributions.
+
+        infos : list of dict
+            Per-observation diagnostics. Each dictionary contains:
+
+            ``"n_events"``
+                Number of split-crossing events on the path.
+
+            ``"endpoint_delta"``
+                Selected model output at the input row minus the selected
+                model output at the baseline.
+
+            ``"attribution_sum"``
+                Sum of feature attributions for the row.
+
+            ``"residual"``
+                ``attribution_sum - endpoint_delta``.
+
+            ``"abs_residual"``
+                Absolute value of ``residual``.
+
+        summary : dict
+            Aggregate diagnostics containing mean, median, and maximum
+            absolute residuals, together with mean, median, and maximum event
+            counts.
+
+        Notes
+        -----
+        ``explain`` is useful for validation, testing, and reporting. For
+        production attribution calls where diagnostics are not needed,
+        ``attribute`` is faster.
+        """
         arrays = self._resolve_arrays_for_target(target)
         b = self._resolve_baseline(baseline, arrays)
         X_prep = self._prepare_X(X, arrays)
@@ -322,14 +514,59 @@ class TreeIG:
         target: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        Return ordered split-crossing prediction events.
+        Return ordered split-crossing events along each attribution path.
 
-        This is a low-level API for downstream scalar-functional attribution,
-        including EDEF. It returns per-observation path events, not feature
-        attribution sums.
+        This advanced method exposes the event representation used internally
+        by TreeIG. It is intended for downstream scalar-functional
+        attribution, including EDEF-style decompositions. It returns path
+        events rather than feature attribution sums.
 
-        Returned arrays are padded to a common width. For observation i, only
-        the first counts[i] entries are valid.
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Evaluation inputs.
+
+        baseline : array-like of shape (n_features,), optional
+            Baseline input. If omitted, the default baseline supplied at
+            construction is used.
+
+        target : int or None, default=None
+            Scalar model-output target.
+
+        Returns
+        -------
+        trace : dict
+            Dictionary with the following entries:
+
+            ``"counts"`` : ndarray of shape (n_samples,)
+                Number of valid events for each observation.
+
+            ``"times"`` : ndarray of shape (n_samples, max_events)
+                Path-crossing times. For row ``i``, only the first
+                ``counts[i]`` entries are valid.
+
+            ``"features"`` : ndarray of shape (n_samples, max_events)
+                Feature index associated with each valid split-crossing event.
+
+            ``"jumps"`` : ndarray of shape (n_samples, max_events)
+                Prediction jump associated with each valid event.
+
+            ``"baseline_prediction"`` : float
+                Selected model output at the baseline.
+
+            ``"endpoint_prediction"`` : ndarray of shape (n_samples,)
+                Selected model output at each input row.
+
+            ``"baseline"`` : ndarray of shape (n_features,)
+                Prepared baseline used in the computation.
+
+            ``"target"`` : int or None
+                Resolved target used in the computation.
+
+        Notes
+        -----
+        Returned event arrays are padded to a common width. Padding entries
+        beyond ``counts[i]`` are not part of the path for observation ``i``.
         """
         arrays = self._resolve_arrays_for_target(target)
         b = self._resolve_baseline(baseline, arrays)
@@ -368,7 +605,85 @@ class TreeIG:
         target: Optional[int] = None,
         batch_size: Optional[int] = None,
     ) -> Dict[str, Any]:
+        """
+        Attribute average loss reduction to input features.
 
+        This method decomposes the improvement in loss from the baseline
+        prediction to the model prediction. The resulting feature values sum
+        to average baseline loss minus average model loss, up to
+        floating-point error.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Evaluation inputs.
+
+        y : array-like of shape (n_samples,)
+            Observed outcomes or labels. For ``loss="squared_error"``, values
+            are interpreted as numeric outcomes. For ``loss="log_loss"``,
+            values must be binary labels in ``{0, 1}``.
+
+        baseline : array-like of shape (n_features,), optional
+            Baseline input. If omitted, the default baseline supplied at
+            construction is used.
+
+        loss : {"squared_error", "log_loss"}, default="squared_error"
+            Loss function used to measure improvement. ``"log_loss"`` is
+            currently for binary classification.
+
+        target : int or None, default=None
+            Scalar model-output target. For binary log-loss, this should
+            select the binary margin convention used by the fitted model.
+
+        batch_size : int or None, default=None
+            Currently unused. Present for API consistency with 
+            attribution methods.
+
+        Returns
+        -------
+        result : dict
+            Dictionary with the following entries:
+
+            ``"observation_values"`` : ndarray of shape (n_samples, n_features)
+                Per-observation feature contributions to loss reduction.
+
+            ``"values"`` : ndarray of shape (n_features,)
+                Average feature contributions to loss reduction.
+
+            ``"standard_errors"`` : ndarray of shape (n_features,)
+                Standard errors of the average feature contributions, computed
+                across observations.
+
+            ``"baseline_loss"`` : float
+                Average loss at the baseline prediction.
+
+            ``"model_loss"`` : float
+                Average loss at the endpoint model predictions.
+
+            ``"total"`` : float
+                ``baseline_loss - model_loss``.
+
+            ``"baseline_prediction"`` : float
+                Selected model output at the baseline.
+
+            ``"endpoint_prediction"`` : ndarray of shape (n_samples,)
+                Selected model output at each input row.
+
+            ``"loss"`` : str
+                Name of the loss function.
+
+        Notes
+        -----
+        Positive values indicate features that reduce loss on average relative
+        to the baseline prediction. Negative values indicate features that
+        increase loss on average.
+
+        Examples
+        --------
+        >>> result = explainer.loss_attribution(X_test, y_test)
+        >>> result["values"]
+        >>> result["total"]
+        """
         if loss not in {"squared_error", "log_loss"}:
             raise NotImplementedError(
                 "Only squared_error and binary log_loss are implemented initially."
@@ -425,7 +740,65 @@ class TreeIG:
         baseline: Optional[np.ndarray] = None,
         n_classes: Optional[int] = None,
     ) -> Dict[str, Any]:
+        """
+        Attribute multiclass log-loss reduction to input features.
 
+        This method decomposes the improvement in multiclass log loss from
+        baseline class scores to endpoint class scores. It computes traces for
+        each class-margin output and combines them into a loss-reduction
+        attribution.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Evaluation inputs.
+
+        y : array-like of shape (n_samples,)
+            Integer class labels. Labels must be nonnegative. The labels are
+            interpreted as class indices.
+
+        baseline : array-like of shape (n_features,), optional
+            Baseline input. If omitted, the default baseline supplied at
+            construction is used.
+
+        n_classes : int or None, default=None
+            Number of classes. If omitted, ``len(model.classes_)`` is used.
+            Provide this explicitly for models that do not expose
+            ``classes_``.
+
+        Returns
+        -------
+        result : dict
+            Dictionary with the following entries:
+
+            ``"observation_values"`` : ndarray of shape (n_samples, n_features)
+                Per-observation feature contributions to multiclass log-loss
+                reduction.
+
+            ``"values"`` : ndarray of shape (n_features,)
+                Average feature contributions.
+
+            ``"standard_errors"`` : ndarray of shape (n_features,)
+                Standard errors of the average feature contributions.
+
+            ``"baseline_loss"`` : float
+                Average multiclass log loss at the baseline class scores.
+
+            ``"model_loss"`` : float
+                Average multiclass log loss at the endpoint class scores.
+
+            ``"total"`` : float
+                ``baseline_loss - model_loss``.
+
+            ``"loss"`` : str
+                Equal to ``"multiclass_log_loss"``.
+
+        Notes
+        -----
+        This method uses raw class-score traces, not probability-output
+        attributions. Positive values indicate features that reduce multiclass
+        log loss on average relative to the baseline class scores.
+        """
         X_prep = self._prepare_X(X)
         y_arr = np.asarray(y, dtype=np.int64).reshape(-1)
 
@@ -527,7 +900,27 @@ class TreeIG:
         baseline: Optional[np.ndarray] = None,
         target: Optional[int] = None,
     ):
-        """Trigger Numba JIT compilation on a small sample and cache y0."""
+        """
+        Trigger JIT compilation and cache baseline tree outputs.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Sample inputs used to trigger compilation. Only up to the first
+            two rows are used.
+
+        baseline : array-like of shape (n_features,), optional
+            Baseline input. If omitted, the default baseline supplied at
+            construction is used.
+
+        target : int or None, default=None
+            Scalar model-output target.
+
+        Returns
+        -------
+        self : TreeIG
+            The fitted TreeIG attribution object.
+        """
         arrays = self._resolve_arrays_for_target(target)
         b = self._resolve_baseline(baseline, arrays)
         X_prep = self._prepare_X(X, arrays)
@@ -552,7 +945,54 @@ def compute(
     target: Optional[int] = None,
     batch_size: Optional[int] = None,
 ):
-    """Functional interface to TreeIG; returns phis, infos, summary."""
+    """
+    Convenience function for computing TreeIG attributions with diagnostics.
+
+    This is a functional wrapper around ``TreeIG(...).explain(...)``. It
+    constructs a temporary ``TreeIG`` object and returns the output of
+    ``explain``.
+
+    Parameters
+    ----------
+    model : object
+        Fitted supported tree-based model.
+
+    baseline : array-like of shape (n_features,)
+        Baseline input.
+
+    X : array-like of shape (n_samples, n_features)
+        Evaluation inputs.
+
+    time_tol : float, default=1e-10
+        Tolerance used when ordering path-crossing times.
+
+    tie_policy : {"first"}, default="first"
+        Rule for coincident active split crossings. Only ``"first"`` is
+        currently implemented.
+
+    target : int or None, default=None
+        Scalar model-output target.
+
+    batch_size : int or None, default=None
+        Number of rows to process per batch.
+
+    Returns
+    -------
+    attributions : ndarray of shape (n_samples, n_features)
+        Exact integrated-gradient feature attributions.
+
+    infos : list of dict
+        Per-observation additivity diagnostics.
+
+    summary : dict
+        Aggregate additivity and event-count diagnostics.
+
+    See Also
+    --------
+    TreeIG : Object-oriented interface.
+    TreeIG.attribute : Fast attribution method without diagnostics.
+    TreeIG.explain : Attribution method with diagnostics.
+    """
     return TreeIG(
         model,
         baseline=baseline,
