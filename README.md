@@ -1,5 +1,7 @@
 # TreeIG
 
+[![PyPI version](https://img.shields.io/pypi/v/treeig.svg)](https://pypi.org/project/treeig/)
+
 TreeIG computes exact Integrated Gradients for tree ensembles. It decomposes the change in a fitted tree model's scalar output between a baseline input $x_0$ and an observation $x$ into additive feature contributions.
 
 For each observation, TreeIG returns feature attributions $\phi_j$ satisfying
