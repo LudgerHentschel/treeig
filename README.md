@@ -321,8 +321,7 @@ Future extensions may include:
 TreeIG:
 
 - Hentschel, Ludger. 2026.
-  ["TreeIG: Exact Integrated Gradients for Tree-Based Models."](https://www.ludgerhentschel.com/PDFs/Hentschel%20'26g.pdf)
-  
+  ["TreeIG: Exact Integrated Gradients for Tree-Based Models."](https://www.ludgerhentschel.com/PDFs/Hentschel%20'26g.pdf)    
   *https://www.ludgerhentschel.com/Research.html* and *https://www.ludgerhentschel.com/Programs.html*
 
 Integrated Gradients:
