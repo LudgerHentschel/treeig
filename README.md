@@ -10,7 +10,7 @@ where $F$ is the scalar model output being explained. For regression models, $F$
 
 Integrated Gradients (Sundararajan, Taly, and Yan, 2017) defines feature attributions by integrating model gradients along a straight-line path from a baseline $x_0$ to the observation $x$.
 
-At first glance, Integrated Gradients appears mismatched with piecewise-constant tree models: gradients vanish almost everywhere and are undefined at split boundaries. The path-integral formulation resolves this. Rather than introducing numerical approximation error through quadrature, the tree structure permits an exact finite decomposition in which the attribution reduces to the sum of prediction jumps at split boundaries crossed along the integration path. The result is exact — no Monte Carlo sampling, no numerical quadrature, no approximation parameters.
+At first glance, Integrated Gradients appears mismatched with piecewise-constant tree models: gradients vanish almost everywhere and are undefined at split boundaries. Hentschel (2026) shows that the path-integral formulation resolves this. The tree structure permits an exact finite decomposition in which the attribution reduces to the sum of prediction jumps at split boundaries crossed along the integration path. The result is exact — no Monte Carlo sampling, no numerical quadrature, no approximation parameters.
 
 Because TreeIG replaces numerical quadrature and sampling with a finite sum over split crossings, it is fast in practice. For many real-world models — hundreds of trees, hundreds of features, thousands of observations — attribution completes in under a millisecond on a modern laptop. (See the example notebook for timings.) For many typical use cases TreeIG is faster than TreeSHAP, which is itself considered fast.
 
@@ -322,7 +322,8 @@ TreeIG:
 
 - Hentschel, Ludger. 2026.
   "TreeIG: Exact Integrated Gradients for Tree-Based Models."
-  *https://www.ludgerhentschel.com/Research.html*
+  *https://www.ludgerhentschel.com/Research.html* and  
+  *https://www.ludgerhentschel.com/Programs.html*
 
 Integrated Gradients:
 
