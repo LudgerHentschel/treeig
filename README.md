@@ -2,7 +2,7 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/treeig.svg)](https://pypi.org/project/treeig/)
 
-TreeIG computes exact Integrated Gradients for tree ensembles. It decomposes the change in a fitted tree model's scalar output between a baseline input $x_0$ and an observation $x$ into additive feature contributions.
+TreeIG computes exact Integrated Gradients for tree-based models. It decomposes the change in a fitted tree model's scalar output between a baseline input $x_0$ and an observation $x$ into additive feature contributions.
 
 For each observation, TreeIG returns feature attributions $\phi_j$ satisfying
 
@@ -14,23 +14,42 @@ Integrated Gradients (Sundararajan, Taly, and Yan, 2017) defines feature attribu
 
 At first glance, Integrated Gradients appears mismatched with piecewise-constant tree models: gradients vanish almost everywhere and are undefined at split boundaries. [Hentschel (2026)](https://www.ludgerhentschel.com/PDFs/Hentschel%20'26g.pdf) shows that, for tree-based models, the path-integral of the gradients reduces to the sum of prediction jumps at split boundaries crossed along the integration path. The resulting attribution is exact — no Monte Carlo sampling, no numerical quadrature, no approximation parameters.
 
-Because TreeIG replaces numerical quadrature and sampling with a finite sum over split crossings, it is fast in practice. For many real-world models — hundreds of trees, hundreds of features, thousands of observations — attribution completes in under a millisecond on a modern laptop. (See the example notebook for timings.) For many typical use cases TreeIG is faster than TreeSHAP, which is itself considered fast.
+Because TreeIG replaces numerical quadrature and sampling with a finite sum over split crossings, it is fast in practice. For many real-world models — hundreds of trees, hundreds of features — attribution over thousands of observations completes in a few milliseconds on a modern laptop. (See the [example notebook](examples/) for timings.) For many typical use cases TreeIG is competitive with, and often faster than, TreeSHAP, which is itself considered fast.
+
+TreeIG also includes [TreeIGNumeric](#treeignumeric), a model-agnostic fallback that recovers the same crossing-sum attribution through numerical event detection when exact structural support is unavailable.
 
 ## Installation
-
-Requires Python ≥ 3.9, NumPy, and Numba.
 
 ```bash
 pip install treeig
 ```
 
-## Using TreeIG
+Requires Python ≥ 3.9, NumPy, and Numba. Model backends (scikit-learn, XGBoost, LightGBM) are not installed automatically; install whichever you use.
 
-TreeIG follows a familiar explainer pattern:
+## Quickstart
 
 ```python
-ig = treeig.TreeIG(model, baseline=x0)
-phi = ig.attribute(X)
+import numpy as np
+import treeig as tig
+
+# model is a fitted supported tree model
+x0 = X_train.mean(axis=0)
+X_eval = X_test[:100]
+
+ig = tig.TreeIG(model, baseline=x0)
+phi = ig.attribute(X_eval)
+```
+
+`phi` has the same shape as `X_eval`. Row `i`, column `j` is the contribution
+of feature `j` to the model-output change from `x_0` to `X_eval[i]`.
+
+For regression models, the completeness property holds exactly:
+
+```python
+np.testing.assert_allclose(
+    phi.sum(axis=1),
+    model.predict(X_eval) - model.predict(x0.reshape(1, -1))[0],
+)
 ```
 
 ## Why TreeIG?
@@ -42,7 +61,7 @@ zero almost everywhere and undefined at split boundaries.
 
 TreeIG uses the tree structure directly. Along the interpolation path
 
-$$ x(t) = x0 + t \cdot (x - x0),\qquad    0 \le t \le 1, $$
+$$ x(t) = x_0 + t\,(x - x_0),\qquad 0 \le t \le 1, $$
 
 a tree prediction changes only when the path crosses a split threshold.
 TreeIG finds those crossings exactly and assigns each prediction jump to the
@@ -59,38 +78,10 @@ of each impulse is exactly the prediction jump at that crossing.
   <img src="docs/Figure_TreeGradient.svg" width="700">
 </p>
 
-The top panel shows a step in the tree prediction along the interpolation path. The middle panel shows the corresponding distributional derivative: zero everywhere except at the split crossing. (Here, $\delta(t - t^\ast)$ is the Dirac delta distribution centered at $t^\ast$.) The bottom panel shows that the path integral localizes exactly at the crossing and recovers the prediction jump. TreeIG exploits the fact that integrated gradients applied to trees requires neither numerical differentiation nor numerical integration, it reduces to a simple sum of prediction steps along the integration path $x(t)$. 
+The top panel shows a step in the tree prediction along the interpolation path. The middle panel shows the corresponding distributional derivative: zero everywhere except at the split crossing. (Here, $\delta(t - t^\ast)$ is the Dirac delta distribution centered at $t^\ast$.) The bottom panel shows that the path integral localizes exactly at the crossing and recovers the prediction jump. TreeIG exploits the fact that integrated gradients applied to trees requires neither numerical differentiation nor numerical integration; it reduces to a simple sum of prediction steps along the integration path $x(t)$.
 
-Standard numerical Integrated Gradients methods try to approximate these impulses using dense interpolation grids. TreeIG instead computes the split-crossing contributions analytically from the fitted tree structure.
+Standard numerical Integrated Gradients methods try to approximate these impulses using dense interpolation grids. TreeIG instead computes the split-crossing contributions analytically from the fitted tree structure. In this sense, TreeIG plays a role analogous to automatic differentiation for smooth models: rather than numerically searching for discontinuities, it uses the model's computational structure to evaluate the attribution integral exactly and efficiently. (The analogy understates the gain. Automatic differentiation removes derivative approximation but not the numerical quadrature used by Integrated Gradients. TreeIG exploits tree structure to evaluate the attribution integral itself exactly.)
 
-For speed and accuracy, TreeIG exploits the explicit split structure of decision trees to identify crossing locations directly. In this sense, TreeIG plays a role analogous to automatic differentiation for smooth models: rather than numerically searching for discontinuities, it uses the model's computational structure to evaluate the attribution integral exactly and efficiently. (The analogy understates the gain. Automatic differentiation removes derivative approximation but not the numerical quadrature used by Integrated Gradients. TreeIG exploits tree structure to evaluate the attribution integral itself exactly.)
-
-
-## Relation to SHAP and TreeSHAP
-
-TreeIG and TreeSHAP answer different attribution questions and generally produce different decompositions. Neither dominates the other.
-
-**TreeIG** answers: "How much does feature $j$ contribute to the change in prediction as we move continuously from baseline $x_0$ to observation $x$?"
-
-- Attribution is the integral of partial derivatives along the path from $x_0$ to $x$. (For piecewise-constant trees this integral reduces exactly to a sum of prediction jumps at split boundaries crossed along the path.)
-
-**TreeSHAP** answers: "How much does feature $j$ shift the expected prediction, averaged over all possible subsets of the other features?"
-
-- Attribution is an average of discrete inclusion effects, where absent features are marginalized out over a background dataset. There is no path; the reference point is the expected prediction over the background distribution.
-
-The methods differ in two fundamental ways.
-
-First, TreeIG takes a specific baseline input $x_0$ as its reference, while TreeSHAP uses a background distribution.
-
-Second, TreeIG measures contributions through calculus -- integrating how the prediction changes as features move continuously from their baseline values -- while TreeSHAP measures contributions through discrete feature inclusion, asking how much each feature changes the expected prediction when it enters a coalition.
-
-SHAP's coalition construction is deliberately indifferent to the prediction surface between the background and the observation. A feature is either in the coalition or out — there is no interpolation, no path, no attention to what happens as the feature value moves from its background value to its observed value. The attribution is built entirely from discrete switches. This means SHAP explores a wide neighborhood of hybrid inputs, many of which may be far from any natural path between real observations, and measures how the model responds to that exploration.
-
-IG by contrast follows a single specific path and pays close attention to everything that happens along it. The attribution accumulates exactly the prediction changes that occur as all features move continuously from their baseline values to their observed values, holding the model fixed throughout. Nothing synthetic is introduced — the model is only ever evaluated at convex combinations of two real inputs.
-
-The practical implication: SHAP's breadth gives it sensitivity to how the model behaves across a wide range of feature combinations, including combinations that sit away from the natural data distribution. IG's specificity gives it a precise account of what the model does on a particular trajectory through input space. SHAP explores a neighborhood; IG traces a path.
-
-For a linear model with $x_0$ equal to the background mean, TreeIG and TreeSHAP produce identical attributions. As the model becomes more nonlinear or the baseline $x_0$ diverges from the background distribution, the two methods increasingly disagree — reflecting genuine differences in the questions they answer rather than errors in either method.
 ## Supported models
 
 TreeIG currently supports tree models with finite numeric feature inputs.
@@ -120,9 +111,9 @@ structure. Since tree representations differ substantially across
 implementations, each model family requires customized parsing and routing
 logic.
 
-## Not currently supported
+### Exact support not currently available
 
-TreeIG deliberately does not yet support:
+The exact TreeIG parser does not currently support:
 
 - CatBoost;
 - categorical splits;
@@ -130,32 +121,47 @@ TreeIG deliberately does not yet support:
 - probability-output attribution (because probability attribution is not additive);
 - probability-averaging or vote-share classifiers such as
   `DecisionTreeClassifier`, `RandomForestClassifier`, and
-  `ExtraTreesClassifier` (because the produce probabilities, not scores).
+  `ExtraTreesClassifier` (because they produce probabilities, not scores).
 
-## Basic usage
+Many of these can still be attributed with the model-agnostic
+[TreeIGNumeric](#treeignumeric), described below.
+
+## TreeIGNumeric
+
+TreeIGNumeric is a model-agnostic fallback that recovers the crossing-sum
+attribution by numerically detecting prediction discontinuities along the
+integration path. It requires no access to model internals — only repeated
+evaluations of the prediction function — so it applies to many
+piecewise-constant models the exact parser does not support. Whenever a
+supported backend is available, exact TreeIG should be preferred.
+
+TreeIGNumeric scans a numerical grid along the integration path to locate
+changes in the prediction, then uses local axis-aligned probes at each detected
+change to attribute the step to a feature. It preserves completeness for the
+detected changes and typically produces attributions very similar to exact
+TreeIG. Because it locates crossings numerically, multiple nearby crossings may
+occasionally be merged into a single event; exact TreeIG avoids this by
+enumerating crossings directly from the tree structure.
+
+Two caveats on coverage:
+
+- **CatBoost and other encoded models.** TreeIGNumeric removes the *parsing*
+  barrier, but not the modeling one: interpolating a *native* categorical
+  feature along the straight-line path is not meaningful, which is a property of
+  Integrated Gradients itself, not of the implementation. TreeIGNumeric works on
+  CatBoost (and similar) models with numeric or one-hot-encoded inputs.
+- **Probability-averaging classifiers.** For models without an additive score
+  (e.g. `RandomForestClassifier`), TreeIGNumeric explains a class *probability*,
+  so completeness holds in probability space:
+  $\sum_j \phi_j = p(x) - p(x_0)$.
 
 ```python
-import numpy as np
 import treeig as tig
 
-# model is a fitted supported tree model
-x0 = X_train.mean(axis=0)
-X_eval = X_test[:100]
+ig = tig.TreeIGNumeric(model, baseline=x0)
+phi, infos, summary = ig.explain(X_eval)
 
-ig = tig.TreeIG(model, baseline=x0)
-phi = ig.attribute(X_eval)
-```
-
-`phi` has the same shape as `X_eval`. Row `i`, column `j` is the contribution
-of feature `j` to the model-output change from `x0` to `X_eval[i]`.
-
-For regression models, the completeness property holds exactly:
-
-```python
-np.testing.assert_allclose(
-    phi.sum(axis=1),
-    model.predict(X_eval) - model.predict(x0.reshape(1, -1))[0],
-)
+print(summary["mean_abs_residual"])
 ```
 
 ## Diagnostics
@@ -182,7 +188,10 @@ Each entry in `infos` contains diagnostics for one observation:
 }
 ```
 
-The `summary` dictionary reports aggregate residual and event-count statistics.
+TreeIGNumeric returns the same fields plus `n_coincident_events`, the number of
+events at which multiple crossings were merged and allocated by the fallback
+rule. The `summary` dictionary reports aggregate residual and event-count
+statistics.
 
 ## Classification targets
 
@@ -265,7 +274,51 @@ from $x_0$ to $x$. Positive contributions increase the scalar output relative
 to the baseline; negative contributions decrease it. The contributions are
 additive by construction.
 
-## Example: XGBoost regression
+## Relation to SHAP and TreeSHAP
+
+TreeIG and TreeSHAP answer different attribution questions and generally produce
+different decompositions. Neither dominates the other.
+
+**TreeIG** answers: "How much does feature $j$ contribute to the change in
+prediction as we move continuously from baseline $x_0$ to observation $x$?" The
+attribution is the integral of partial derivatives along the path from $x_0$ to
+$x$, which for piecewise-constant trees reduces exactly to a sum of prediction
+jumps at the split boundaries crossed along the path.
+
+**TreeSHAP** answers: "How much does feature $j$ shift the expected prediction,
+averaged over all possible subsets of the other features?" The attribution is an
+average of discrete inclusion effects, where absent features are marginalized
+out over a background dataset. There is no path; the reference is the expected
+prediction over the background distribution.
+
+The two differ in two ways. First, TreeIG takes a specific baseline input $x_0$
+as its reference, while TreeSHAP uses a background distribution. Second, TreeIG
+measures contributions through calculus — integrating how the prediction changes
+as features move continuously from their baseline values — while TreeSHAP
+measures them through discrete feature inclusion, asking how much each feature
+changes the expected prediction when it enters a coalition.
+
+The practical consequence is one of scope. SHAP's coalition construction is
+indifferent to the prediction surface between the background and the
+observation: a feature is either in the coalition or out, so the attribution is
+built from discrete switches and explores a wide neighborhood of hybrid inputs,
+many far from any natural path between real observations. IG instead follows a
+single path and accumulates exactly the prediction changes along it, evaluating
+the model only at convex combinations of two real inputs. SHAP explores a
+neighborhood; IG traces a path. SHAP's breadth gives sensitivity to model
+behavior across many feature combinations; IG's specificity gives a precise
+account of one trajectory through input space.
+
+For a linear model with independent features and $x_0$ equal to the background
+mean, TreeIG and interventional SHAP coincide. (A linear model is not a tree, so
+the comparison is to SHAP generally rather than to TreeSHAP.) As the model
+becomes more nonlinear or the baseline $x_0$ diverges from the background
+distribution, the two increasingly disagree — reflecting genuine differences in
+the questions they answer rather than errors in either method.
+
+## Examples
+
+### XGBoost regression
 
 ```python
 import numpy as np
@@ -291,7 +344,7 @@ print(phi.shape)
 print(summary["max_abs_residual"])
 ```
 
-## Example: multiclass classification margins
+### Multiclass classification margins
 
 ```python
 import lightgbm as lgb
@@ -308,25 +361,50 @@ ig = tig.TreeIG(model, baseline=x0, target=2)
 phi = ig.attribute(X_eval)
 ```
 
+### Model-agnostic attribution
+
+```python
+import treeig as tig
+
+ig = tig.TreeIGNumeric(model, baseline=x0)
+phi, infos, summary = ig.explain(X_eval)
+
+print(summary["mean_abs_residual"])
+```
+
 ## Project status
 
-TreeIG is production-ready for exact attribution of fitted tree models in
-raw-output space. The current release covers the dominant tree ensemble
-backends in the Python ecosystem.
+TreeIG is production-ready for exact attribution of supported tree models in raw-output space. The current release covers the dominant tree ensemble backends in the Python ecosystem. TreeIGNumeric provides a model-agnostic fallback for unsupported piecewise-constant models.
 
 Future extensions may include:
 
-- CatBoost support, which requires customized analysis of oblivious trees
-  and categorical split structure;
-- alternative allocation rules for simultaneous multi-feature effects at
-  coincident split crossings.
+- exact structural support for CatBoost and other currently unsupported tree implementations;
+- customized handling of categorical split structures and missing-value routing;
+- alternative allocation rules for simultaneous multi-feature effects at coincident crossings.
+
+## Citation
+
+If you use TreeIG in your work, please cite:
+
+```bibtex
+@misc{hentschel2026treeig,
+  author = {Hentschel, Ludger},
+  title  = {{TreeIG}: Exact Integrated Gradients for Tree-Based Models},
+  year   = {2026},
+  url    = {https://www.ludgerhentschel.com/PDFs/Hentschel%20'26g.pdf},
+}
+```
+
+## License
+
+TreeIG is released under the terms in [LICENSE](LICENSE).
 
 ## References
 
 TreeIG:
 
 - Hentschel, Ludger. 2026.
-  ["TreeIG: Exact Integrated Gradients for Tree-Based Models."](https://www.ludgerhentschel.com/PDFs/Hentschel%20'26g.pdf)    
+  ["TreeIG: Exact Integrated Gradients for Tree-Based Models."](https://www.ludgerhentschel.com/PDFs/Hentschel%20'26g.pdf)
   *https://www.ludgerhentschel.com/Research.html* and *https://www.ludgerhentschel.com/Programs.html*
 
 Integrated Gradients:
