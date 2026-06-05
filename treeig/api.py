@@ -65,6 +65,13 @@ from .dispatch import extract_tree_arrays, model_predict
 from .utils import _as_float32_float64, _as_target_key, _check_finite_numeric
 
 
+def _mean_standard_errors(values: np.ndarray) -> np.ndarray:
+    n_obs = values.shape[0]
+    if n_obs < 2:
+        return np.full(values.shape[1], np.nan, dtype=np.float64)
+    return values.std(axis=0, ddof=1) / np.sqrt(n_obs)
+
+
 class TreeIG:
     """
     Exact integrated-gradient attribution for supported tree-based models.
@@ -724,7 +731,7 @@ class TreeIG:
         return {
             "observation_values": obs_values,
             "values": obs_values.mean(axis=0),
-            "standard_errors": obs_values.std(axis=0, ddof=1) / np.sqrt(X_prep.shape[0]),
+            "standard_errors": _mean_standard_errors(obs_values),
             "baseline_loss": float(np.mean(baseline_losses)),
             "model_loss": float(np.mean(model_losses)),
             "total": float(np.mean(baseline_losses) - np.mean(model_losses)),
@@ -881,10 +888,7 @@ class TreeIG:
         return {
             "observation_values": observation_values,
             "values": values,
-            "standard_errors": (
-                observation_values.std(axis=0, ddof=1)
-                / np.sqrt(X_prep.shape[0])
-            ),
+            "standard_errors": _mean_standard_errors(observation_values),
             "baseline_loss": float(np.mean(baseline_losses)),
             "model_loss": float(np.mean(model_losses)),
             "total": float(

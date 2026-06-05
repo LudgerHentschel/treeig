@@ -617,6 +617,23 @@ def test_batch_size_matches_full_batch():
     with pytest.raises(ValueError):
         ig.attribute(X_eval, batch_size=0)
 
+
+def test_loss_attribution_single_observation_standard_errors_are_nan_without_warning(recwarn):
+    import_or_skip("sklearn")
+    from sklearn.tree import DecisionTreeRegressor
+
+    X, y = make_regression_data(seed=25)
+    baseline = finite_baseline(X)
+
+    model = DecisionTreeRegressor(max_depth=3, random_state=0).fit(X, y)
+    explainer = TreeIG(model, baseline=baseline)
+
+    result = explainer.loss_attribution(X[:1], y[:1])
+
+    assert len(recwarn) == 0
+    assert np.isnan(result["standard_errors"]).all()
+
+
 def test_trace_reconstructs_attribute():
     import_or_skip("sklearn")
     from sklearn.ensemble import RandomForestRegressor
@@ -655,4 +672,3 @@ if __name__ == "__main__":
     import sys
 
     sys.exit(pytest.main(["-v", __file__]))
-
