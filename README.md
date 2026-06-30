@@ -428,4 +428,6 @@ Popular implementations of Integrated Gradients for smooth models:
 - Captum for PyTorch: https://captum.ai/
 - TensorFlow Integrated Gradients: https://www.tensorflow.org/tutorials/interpretability/integrated_gradients
 
-**Keywords**: `xgboost-feature-importance` | `lightgbm-interpretability` | `integrated-gradients-decision-trees` | `shap-alternative` | `gradient-boosted-trees-xai` | `integrated-gradients-tree-models` | `feature-importance` | `explainable-ai` | `feature-attribution-tree-models`
+------------------------
+
+**Keywords**: `xgboost-feature-importance` | `lightgbm-interpretability` | `integrated-gradients-decision-trees` | `random-forest-integrated-gradients` | `xgboost-integrated-gradients` | `lightgbm-integrated-gradients` | `gradient-boosting-integrated-gradients` | `decision-tree-integrated-gradients` | `shap-alternative` | `gradient-boosted-trees-xai` | `integrated-gradients-tree-models` | `feature-importance` | `explainable-ai` | `feature-attribution-tree-models`
