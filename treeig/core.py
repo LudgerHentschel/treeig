@@ -82,6 +82,21 @@ def _baseline_leaf_values(cl, cr, feat, thresh, val, left_inc, round_input, x0):
     return y0
 
 
+@njit(parallel=True)
+def _baseline_leaf_values_batch(
+    cl, cr, feat, thresh, val, left_inc, round_input, baselines
+):
+    """Traverse every tree for every baseline in one compiled call."""
+    out = np.empty((baselines.shape[0], cl.shape[0]), dtype=np.float64)
+    for b in prange(baselines.shape[0]):
+        for m in range(cl.shape[0]):
+            out[b, m] = _predict_leaf(
+                cl, cr, feat, thresh, val, left_inc, round_input,
+                m, baselines[b],
+            )
+    return out
+
+
 @njit
 def _dfs_intervals(
     cl,
@@ -579,6 +594,51 @@ def _compute_batch(
     return phis, event_counts
 
 
+@njit(parallel=True)
+def _compute_weighted_baseline_batch(
+    cl, cr, feat, thresh, val, left_inc, round_input,
+    baselines, baseline_weights, X, y0_per_baseline_tree,
+    tree_weight, time_tol,
+):
+    """Accumulate a baseline distribution inside one compiled traversal."""
+    n_obs, p = X.shape
+    n_baselines = baselines.shape[0]
+    n_trees = cl.shape[0]
+    buf = cl.shape[1] * 2
+    phis = np.zeros((n_obs, p), dtype=np.float64)
+    event_counts = np.zeros(n_obs, dtype=np.float64)
+
+    dx = np.empty((n_obs, p), dtype=np.float64)
+    phi_one = np.empty((n_obs, p), dtype=np.float64)
+    stk_node = np.empty((n_obs, buf), dtype=np.int64)
+    stk_tl = np.empty((n_obs, buf), dtype=np.float64)
+    stk_tr = np.empty((n_obs, buf), dtype=np.float64)
+    stk_ef = np.empty((n_obs, buf), dtype=np.int64)
+    seg_tl = np.empty((n_obs, buf), dtype=np.float64)
+    seg_val = np.empty((n_obs, buf), dtype=np.float64)
+    seg_ef = np.empty((n_obs, buf), dtype=np.int64)
+    probe = np.empty((n_obs, p), dtype=np.float64)
+
+    for i in prange(n_obs):
+        for b in range(n_baselines):
+            for j in range(p):
+                dx[i, j] = X[i, j] - baselines[b, j]
+                phi_one[i, j] = 0.0
+            count = 0
+            for m in range(n_trees):
+                count += _attribute_one_tree(
+                    cl, cr, feat, thresh, val, left_inc, round_input, m,
+                    baselines[b], X[i], dx[i],
+                    y0_per_baseline_tree[b, m], tree_weight[m], time_tol,
+                    phi_one[i], stk_node[i], stk_tl[i], stk_tr[i],
+                    stk_ef[i], seg_tl[i], seg_val[i], seg_ef[i], probe[i],
+                )
+            for j in range(p):
+                phis[i, j] += baseline_weights[b] * phi_one[i, j]
+            event_counts[i] += baseline_weights[b] * count
+    return phis, event_counts
+
+
 def _arrays_signature(arrays: Dict[str, Any]) -> Tuple[str, Optional[int]]:
     return (str(arrays.get("backend", "unknown")), arrays.get("target", None))
 
@@ -620,6 +680,17 @@ def _compute_attributions_with_y0(
     return _compute_batch(cl, cr, ft, th, va, li, ri, baseline, X, y0_per_tree, tw, time_tol)
 
 
+def _compute_weighted_attributions(
+    arrays, baselines, baseline_weights, X, time_tol, y0_per_baseline_tree
+):
+    return _compute_weighted_baseline_batch(
+        arrays["children_left"], arrays["children_right"], arrays["feature"],
+        arrays["threshold"], arrays["value"], arrays["left_inclusive"],
+        _round_input_array(arrays), baselines, baseline_weights, X,
+        y0_per_baseline_tree, arrays["tree_weight"], time_tol,
+    )
+
+
 def _compute_y0_per_tree(arrays: Dict[str, Any], baseline: np.ndarray) -> np.ndarray:
     cl = arrays["children_left"]
     cr = arrays["children_right"]
@@ -629,6 +700,16 @@ def _compute_y0_per_tree(arrays: Dict[str, Any], baseline: np.ndarray) -> np.nda
     li = arrays["left_inclusive"]
     ri = _round_input_array(arrays)
     return _baseline_leaf_values(cl, cr, ft, th, va, li, ri, baseline)
+
+
+def _compute_y0_per_baseline_tree(
+    arrays: Dict[str, Any], baselines: np.ndarray
+) -> np.ndarray:
+    return _baseline_leaf_values_batch(
+        arrays["children_left"], arrays["children_right"], arrays["feature"],
+        arrays["threshold"], arrays["value"], arrays["left_inclusive"],
+        _round_input_array(arrays), baselines,
+    )
 
 
 def _compute_event_traces(
@@ -861,6 +942,96 @@ def _loss_reduction_scalar_batch(
     return observation_values, baseline_losses, model_losses
 
 
+@njit(parallel=True)
+def _loss_reduction_weighted_baseline_batch(
+    cl, cr, feat, thresh, val, left_inc, round_input,
+    baselines, baseline_weights, X, y, y0_per_baseline_tree,
+    tree_weight, baseline_predictions, endpoint_prediction,
+    time_tol, loss_code,
+):
+    """Compute baseline-specific loss paths and aggregate them in place."""
+    n_obs, p = X.shape
+    n_baselines = baselines.shape[0]
+    n_trees = cl.shape[0]
+    buf = cl.shape[1] * 2
+    max_events = n_trees * (buf + 2)
+
+    observation_values = np.zeros((n_obs, p), dtype=np.float64)
+    baseline_losses = np.zeros(n_obs, dtype=np.float64)
+    model_losses = np.empty(n_obs, dtype=np.float64)
+
+    dx = np.empty((n_obs, p), dtype=np.float64)
+    times = np.empty((n_obs, max_events), dtype=np.float64)
+    features = np.empty((n_obs, max_events), dtype=np.int64)
+    jumps = np.empty((n_obs, max_events), dtype=np.float64)
+    stk_node = np.empty((n_obs, buf), dtype=np.int64)
+    stk_tl = np.empty((n_obs, buf), dtype=np.float64)
+    stk_tr = np.empty((n_obs, buf), dtype=np.float64)
+    stk_ef = np.empty((n_obs, buf), dtype=np.int64)
+    seg_tl = np.empty((n_obs, buf), dtype=np.float64)
+    seg_val = np.empty((n_obs, buf), dtype=np.float64)
+    seg_ef = np.empty((n_obs, buf), dtype=np.int64)
+    probe = np.empty((n_obs, p), dtype=np.float64)
+
+    for i in prange(n_obs):
+        for b in range(n_baselines):
+            for j in range(p):
+                dx[i, j] = X[i, j] - baselines[b, j]
+
+            n_events_i = 0
+            for m in range(n_trees):
+                n_events_i += _trace_one_tree(
+                    cl, cr, feat, thresh, val, left_inc, round_input, m,
+                    baselines[b], X[i], dx[i],
+                    y0_per_baseline_tree[b, m], tree_weight[m], time_tol,
+                    times[i], features[i], jumps[i], n_events_i,
+                    stk_node[i], stk_tl[i], stk_tr[i], stk_ef[i],
+                    seg_tl[i], seg_val[i], seg_ef[i], probe[i],
+                )
+
+            _sort_events_by_time(
+                times[i], features[i], jumps[i], n_events_i
+            )
+            pred_before = baseline_predictions[b]
+            weight = baseline_weights[b]
+            for k in range(n_events_i):
+                feature_index = features[i, k]
+                pred_after = pred_before + jumps[i, k]
+                if loss_code == 0:
+                    contribution = (
+                        _squared_error_loss_numba(y[i], pred_before)
+                        - _squared_error_loss_numba(y[i], pred_after)
+                    )
+                else:
+                    contribution = (
+                        _binary_log_loss_numba(y[i], pred_before)
+                        - _binary_log_loss_numba(y[i], pred_after)
+                    )
+                if feature_index >= 0:
+                    observation_values[i, feature_index] += weight * contribution
+                pred_before = pred_after
+
+            if loss_code == 0:
+                baseline_losses[i] += weight * _squared_error_loss_numba(
+                    y[i], baseline_predictions[b]
+                )
+            else:
+                baseline_losses[i] += weight * _binary_log_loss_numba(
+                    y[i], baseline_predictions[b]
+                )
+
+        if loss_code == 0:
+            model_losses[i] = _squared_error_loss_numba(
+                y[i], endpoint_prediction[i]
+            )
+        else:
+            model_losses[i] = _binary_log_loss_numba(
+                y[i], endpoint_prediction[i]
+            )
+
+    return observation_values, baseline_losses, model_losses
+
+
 def _loss_reduction_batch(
     arrays: Dict[str, Any],
     baseline: np.ndarray,
@@ -907,6 +1078,30 @@ def _loss_reduction_batch(
         endpoint_prediction,
         time_tol,
         loss_code,
+    )
+
+
+def _loss_reduction_weighted_batch(
+    arrays: Dict[str, Any], baselines: np.ndarray,
+    baseline_weights: np.ndarray, X: np.ndarray, y: np.ndarray,
+    time_tol: float, y0_per_baseline_tree: np.ndarray,
+    baseline_predictions: np.ndarray, endpoint_prediction: np.ndarray,
+    loss: str,
+):
+    if loss == "squared_error":
+        loss_code = 0
+    elif loss == "log_loss":
+        loss_code = 1
+    else:
+        raise NotImplementedError(
+            "Only squared_error and binary log_loss are implemented."
+        )
+    return _loss_reduction_weighted_baseline_batch(
+        arrays["children_left"], arrays["children_right"], arrays["feature"],
+        arrays["threshold"], arrays["value"], arrays["left_inclusive"],
+        _round_input_array(arrays), baselines, baseline_weights, X, y,
+        y0_per_baseline_tree, arrays["tree_weight"], baseline_predictions,
+        endpoint_prediction, time_tol, loss_code,
     )
     
 @njit
@@ -1033,4 +1228,108 @@ def _loss_reduction_multiclass_from_traces_batch(
 
         model_losses[i] = _multiclass_log_loss_numba(y[i], endpoint_scores[i])
 
-    return observation_values, baseline_losses, model_losses    
+    return observation_values, baseline_losses, model_losses
+
+
+@njit(parallel=True)
+def _loss_reduction_weighted_multiclass_tree_batch(
+    cl, cr, feat, thresh, val, left_inc, round_input,
+    baselines, baseline_weights, X, y, y0,
+    tree_weight, baseline_scores, endpoint_scores, time_tol,
+):
+    """Trace and aggregate weighted multiclass loss paths in compiled code."""
+    n_classes = cl.shape[0]
+    n_trees = cl.shape[1]
+    n_obs, p = X.shape
+    n_baselines = baselines.shape[0]
+    buf = cl.shape[2] * 2
+    max_total_events = n_classes * n_trees * (buf + 2)
+
+    observation_values = np.zeros((n_obs, p), dtype=np.float64)
+    baseline_losses = np.zeros(n_obs, dtype=np.float64)
+    model_losses = np.empty(n_obs, dtype=np.float64)
+
+    dx = np.empty((n_obs, p), dtype=np.float64)
+    event_t = np.empty((n_obs, max_total_events), dtype=np.float64)
+    event_class = np.empty((n_obs, max_total_events), dtype=np.int64)
+    event_feature = np.empty((n_obs, max_total_events), dtype=np.int64)
+    event_jump = np.empty((n_obs, max_total_events), dtype=np.float64)
+    current_scores = np.empty((n_obs, n_classes), dtype=np.float64)
+    stk_node = np.empty((n_obs, buf), dtype=np.int64)
+    stk_tl = np.empty((n_obs, buf), dtype=np.float64)
+    stk_tr = np.empty((n_obs, buf), dtype=np.float64)
+    stk_ef = np.empty((n_obs, buf), dtype=np.int64)
+    seg_tl = np.empty((n_obs, buf), dtype=np.float64)
+    seg_val = np.empty((n_obs, buf), dtype=np.float64)
+    seg_ef = np.empty((n_obs, buf), dtype=np.int64)
+    probe = np.empty((n_obs, p), dtype=np.float64)
+
+    for i in prange(n_obs):
+        for b in range(n_baselines):
+            for j in range(p):
+                dx[i, j] = X[i, j] - baselines[b, j]
+            for k in range(n_classes):
+                current_scores[i, k] = baseline_scores[b, k]
+
+            n_events_i = 0
+            for k in range(n_classes):
+                class_start = n_events_i
+                for m in range(n_trees):
+                    n_new = _trace_one_tree(
+                        cl[k], cr[k], feat[k], thresh[k], val[k],
+                        left_inc[k], round_input[k], m, baselines[b], X[i],
+                        dx[i], y0[b, k, m], tree_weight[k, m], time_tol,
+                        event_t[i], event_feature[i], event_jump[i],
+                        n_events_i, stk_node[i], stk_tl[i], stk_tr[i],
+                        stk_ef[i], seg_tl[i], seg_val[i], seg_ef[i], probe[i],
+                    )
+                    n_events_i += n_new
+                for q in range(class_start, n_events_i):
+                    event_class[i, q] = k
+
+            _sort_multiclass_events_by_time_class_feature(
+                event_t[i], event_class[i], event_feature[i],
+                event_jump[i], n_events_i,
+            )
+            weight = baseline_weights[b]
+            baseline_losses[i] += weight * _multiclass_log_loss_numba(
+                y[i], current_scores[i]
+            )
+            for q in range(n_events_i):
+                k = event_class[i, q]
+                j = event_feature[i, q]
+                before = _multiclass_log_loss_numba(y[i], current_scores[i])
+                current_scores[i, k] += event_jump[i, q]
+                after = _multiclass_log_loss_numba(y[i], current_scores[i])
+                if j >= 0:
+                    observation_values[i, j] += weight * (before - after)
+
+        model_losses[i] = _multiclass_log_loss_numba(y[i], endpoint_scores[i])
+
+    return observation_values, baseline_losses, model_losses
+
+
+def _loss_reduction_weighted_multiclass_trees(
+    arrays_by_class, baselines, baseline_weights, X, y, y0,
+    baseline_scores, endpoint_scores, time_tol,
+):
+    keys = (
+        "children_left", "children_right", "feature", "threshold", "value",
+        "left_inclusive", "tree_weight",
+    )
+    stacked = {}
+    for key in keys:
+        shapes = {np.asarray(a[key]).shape for a in arrays_by_class}
+        if len(shapes) != 1:
+            raise ValueError(
+                "Multiclass targets must have compatible padded tree arrays."
+            )
+        stacked[key] = np.stack([a[key] for a in arrays_by_class])
+    round_input = np.stack([_round_input_array(a) for a in arrays_by_class])
+    return _loss_reduction_weighted_multiclass_tree_batch(
+        stacked["children_left"], stacked["children_right"],
+        stacked["feature"], stacked["threshold"], stacked["value"],
+        stacked["left_inclusive"], round_input, baselines, baseline_weights,
+        X, y, y0, stacked["tree_weight"], baseline_scores, endpoint_scores,
+        time_tol,
+    )

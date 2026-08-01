@@ -115,6 +115,68 @@ def assert_attribute_matches_explain(model, X, x0, target=None, atol=1e-12):
     np.testing.assert_allclose(phi_attr, phi_explain, atol=atol, rtol=0.0)
 
 
+def test_weighted_baselines_match_explicit_average():
+    from sklearn.tree import DecisionTreeRegressor
+
+    X, y = make_regression_data(n=80, p=5, seed=123)
+    model = DecisionTreeRegressor(max_depth=4, random_state=123).fit(X, y)
+    baselines = X[:3]
+    weights = np.array([1.0, 2.0, 7.0])
+    X_eval = X[10:16]
+
+    explainer = TreeIG(model)
+    actual, by_baseline = explainer.attribute(
+        X_eval,
+        baseline=baselines,
+        baseline_weights=weights,
+        return_by_baseline=True,
+    )
+    expected_by_baseline = np.stack(
+        [explainer.attribute(X_eval, baseline=b) for b in baselines]
+    )
+    expected = np.tensordot(weights / weights.sum(), expected_by_baseline, axes=1)
+
+    np.testing.assert_allclose(by_baseline, expected_by_baseline)
+    np.testing.assert_allclose(actual, expected)
+    endpoint = model.predict(X_eval) - np.dot(
+        weights / weights.sum(), model.predict(baselines)
+    )
+    np.testing.assert_allclose(actual.sum(axis=1), endpoint, atol=1e-10)
+
+
+def test_weighted_baseline_loss_matches_explicit_average():
+    from sklearn.ensemble import RandomForestRegressor
+
+    X, y = make_regression_data(n=90, p=5, seed=124)
+    model = RandomForestRegressor(
+        n_estimators=8, max_depth=4, random_state=124
+    ).fit(X, y)
+    baselines = X[:4]
+    weights = np.array([1.0, 2.0, 3.0, 4.0])
+    weights /= weights.sum()
+    X_eval, y_eval = X[20:31], y[20:31]
+    explainer = TreeIG(model)
+
+    actual = explainer.loss_attribution(
+        X_eval, y_eval, baseline=baselines, baseline_weights=weights
+    )
+    parts = [
+        explainer.loss_attribution(X_eval, y_eval, baseline=b)
+        for b in baselines
+    ]
+    expected_obs = sum(
+        weights[i] * parts[i]["observation_values"]
+        for i in range(len(parts))
+    )
+
+    np.testing.assert_allclose(actual["observation_values"], expected_obs)
+    np.testing.assert_allclose(
+        actual["baseline_loss"],
+        sum(weights[i] * parts[i]["baseline_loss"] for i in range(len(parts))),
+    )
+    np.testing.assert_allclose(actual["values"].sum(), actual["total"])
+
+
 def import_or_skip(module_name):
     return pytest.importorskip(module_name)
 

@@ -18,10 +18,25 @@ Because TreeIG replaces numerical quadrature and sampling with a finite sum over
 
 TreeIG also includes [TreeIGNumeric](#treeignumeric), a model-agnostic fallback that recovers the same crossing-sum attribution through numerical event detection when exact structural support is unavailable.
 
+## Recommended baseline construction
+
+For Integrated Gradients, the baseline determines the prediction contrast
+being explained. **[CBaseline](https://github.com/lhentschel/cbaseline) is the
+preferred way to construct TreeIG baselines.** It produces empirical,
+prediction-neutral baseline distributions whose weighted mean model output is
+the chosen reference prediction. TreeIG then explains the model prediction
+relative to that reference level rather than relative to an arbitrary feature
+vector such as the feature-wise mean.
+
+TreeIG accepts a CBaseline `Background` directly and evaluates its weighted
+baseline paths efficiently. See CBaseline for construction choices and the
+interpretation of the reference prediction `f0`.
+
 ## Installation
 
 ```bash
 pip install treeig
+pip install cbaseline  # recommended baseline construction
 ```
 
 Requires Python ≥ 3.9, NumPy, and Numba. Model backends (scikit-learn, XGBoost, LightGBM) are not installed automatically; install whichever you use.
@@ -39,6 +54,38 @@ X_eval = X_test[:100]
 ig = tig.TreeIG(model, baseline=x0)
 phi = ig.attribute(X_eval)
 ```
+
+The single-vector example above is the minimal API. For substantive
+attribution, prefer a prediction-neutral distribution constructed with
+[CBaseline](https://github.com/lhentschel/cbaseline).
+
+Weighted baseline distributions are first-class baselines. Pass either a
+matrix and aligned weights or a CBaseline `Background` directly:
+
+```python
+ig = tig.TreeIG(model, baseline=background)  # uses .rows and .weights
+phi = ig.attribute(X_eval)
+
+# Equivalent explicit form; weights are normalized internally.
+phi = ig.attribute(
+    X_eval,
+    baseline=background.rows,
+    baseline_weights=background.weights,
+    baseline_batch_size=25,
+)
+```
+
+TreeIG preserves each baseline-specific path and performs the weighted
+aggregation inside a compiled loop. With `return_by_baseline=True`,
+`attribute` returns `(weighted, by_baseline)` for diagnostics.
+
+Compiled baseline traversal is also used by `loss_attribution` and
+`multiclass_loss_attribution`, including tree-based EDEF. For multiclass log
+loss, TreeIG merges class-score events in chronological path order before
+applying each softmax-loss change. Pass the complete baseline distribution in
+one call instead of invoking the explainer once per baseline: this amortizes
+tree parsing and model dispatch and keeps baseline aggregation inside compiled
+code.
 
 `phi` has the same shape as `X_eval`. Row `i`, column `j` is the contribution
 of feature `j` to the model-output change from `x_0` to `X_eval[i]`.

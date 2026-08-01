@@ -57,9 +57,13 @@ from .core import (
     _compute_attributions_with_y0,
     _compute_core,
     _compute_event_traces,
+    _compute_weighted_attributions,
     _compute_y0_per_tree,
+    _compute_y0_per_baseline_tree,
     _loss_reduction_batch,
+    _loss_reduction_weighted_batch,
     _loss_reduction_multiclass_from_traces_batch, 
+    _loss_reduction_weighted_multiclass_trees,
 )
 from .dispatch import extract_tree_arrays, model_predict
 from .utils import _as_float32_float64, _as_target_key, _check_finite_numeric
@@ -142,11 +146,12 @@ class TreeIG:
     attribution, CatBoost models, and classifiers that average probabilities
     or vote shares directly are not currently supported.
     """
-    
+
     def __init__(
         self,
         model: Any,
         baseline: Optional[np.ndarray] = None,
+        baseline_weights: Optional[np.ndarray] = None,
         time_tol: float = 1e-10,
         tie_policy: str = "first",
         target: Optional[int] = None,
@@ -198,10 +203,15 @@ class TreeIG:
         self.n_features_in_ = int(arrays["n_features"])
         self.backend = arrays.get("backend", "unknown")
 
+        self._baseline_weights = baseline_weights
         if baseline is None:
             self._baseline = None
         else:
-            self._baseline = self._prepare_baseline(baseline)
+            self._baseline, self._baseline_weights = self._prepare_baselines(
+                baseline, baseline_weights
+            )
+            if self._baseline.shape[0] == 1:
+                self._baseline = self._baseline[0]
 
     @staticmethod
     def _round_inputs_for_arrays(arrays: Dict[str, Any]) -> bool:
@@ -224,6 +234,50 @@ class TreeIG:
         if self._round_inputs_for_arrays(arrays):
             return _as_float32_float64(b)
         return np.ascontiguousarray(b, dtype=np.float64)
+
+    def _prepare_baselines(self, baselines, weights=None, arrays=None):
+        if hasattr(baselines, "rows") and hasattr(baselines, "weights"):
+            if weights is not None:
+                raise ValueError(
+                    "baseline_weights must be omitted when baseline supplies weights."
+                )
+            weights = baselines.weights
+            baselines = baselines.rows
+        b = np.asarray(baselines, dtype=np.float64)
+        if b.ndim == 1:
+            b = b.reshape(1, -1)
+        if b.ndim != 2 or b.shape[1] != self.n_features_in_ or b.shape[0] == 0:
+            raise ValueError(
+                "baseline must have shape (n_features,) or "
+                f"(n_baselines, {self.n_features_in_}), got {b.shape}."
+            )
+        b = np.stack([self._prepare_baseline(row, arrays) for row in b])
+        if weights is None:
+            w = np.full(b.shape[0], 1.0 / b.shape[0])
+        else:
+            w = np.asarray(weights, dtype=np.float64).reshape(-1)
+            if w.shape[0] != b.shape[0]:
+                raise ValueError("baseline_weights must align with baseline rows.")
+            if not np.all(np.isfinite(w)) or np.any(w < 0) or w.sum() <= 0:
+                raise ValueError(
+                    "baseline_weights must be finite, nonnegative, and have "
+                    "positive total mass."
+                )
+            w = w / w.sum()
+        return np.ascontiguousarray(b), np.ascontiguousarray(w)
+
+    def _resolve_baselines(self, baseline, baseline_weights, arrays=None):
+        if baseline is not None:
+            return self._prepare_baselines(baseline, baseline_weights, arrays)
+        if self._baseline is None:
+            raise ValueError(
+                "A baseline is required. Pass baseline= to this method, or "
+                "set a default baseline when constructing TreeIG."
+            )
+        return self._prepare_baselines(
+            self._baseline, self._baseline_weights if baseline_weights is None else baseline_weights,
+            arrays,
+        )
 
     def _prepare_X(
         self,
@@ -342,8 +396,11 @@ class TreeIG:
         self,
         X: np.ndarray,
         baseline: Optional[np.ndarray] = None,
+        baseline_weights: Optional[np.ndarray] = None,
         target: Optional[int] = None,
         batch_size: Optional[int] = None,
+        baseline_batch_size: Optional[int] = None,
+        return_by_baseline: bool = False,
     ) -> np.ndarray:
         """
         Compute exact feature attributions for one or more input rows.
@@ -397,19 +454,54 @@ class TreeIG:
         (X_test.shape[0], X_test.shape[1])
         """
         arrays = self._resolve_arrays_for_target(target)
-        b = self._resolve_baseline(baseline, arrays)
+        baselines, weights = self._resolve_baselines(
+            baseline, baseline_weights, arrays
+        )
         X_prep = self._prepare_X(X, arrays)
-        y0 = self._get_y0_per_tree(arrays, b)
-
-        phis, _ = self._attribute_prepared(arrays, b, X_prep, y0, batch_size)
-        return phis
+        baseline_batch_size = self._validate_batch_size(baseline_batch_size)
+        if baseline_batch_size is None:
+            baseline_batch_size = baselines.shape[0]
+        weighted = np.zeros((X_prep.shape[0], X_prep.shape[1]), dtype=float)
+        by_baseline = [] if return_by_baseline else None
+        if not return_by_baseline:
+            target_batch = self._validate_batch_size(batch_size) or X_prep.shape[0]
+            for x_start in range(0, X_prep.shape[0], target_batch):
+                x_stop = min(x_start + target_batch, X_prep.shape[0])
+                for start in range(0, baselines.shape[0], baseline_batch_size):
+                    stop = min(start + baseline_batch_size, baselines.shape[0])
+                    y0 = np.stack([
+                        self._get_y0_per_tree(arrays, baselines[i])
+                        for i in range(start, stop)
+                    ])
+                    phi, _ = _compute_weighted_attributions(
+                        arrays, baselines[start:stop], weights[start:stop],
+                        X_prep[x_start:x_stop], self.time_tol, y0,
+                    )
+                    weighted[x_start:x_stop] += phi
+            return weighted
+        for start in range(0, baselines.shape[0], baseline_batch_size):
+            stop = min(start + baseline_batch_size, baselines.shape[0])
+            for index in range(start, stop):
+                b = baselines[index]
+                y0 = self._get_y0_per_tree(arrays, b)
+                phi, _ = self._attribute_prepared(
+                    arrays, b, X_prep, y0, batch_size
+                )
+                weighted += weights[index] * phi
+                if return_by_baseline:
+                    by_baseline.append(phi)
+        if return_by_baseline:
+            return weighted, np.stack(by_baseline, axis=0)
+        return weighted
 
     def explain(
         self,
         X: np.ndarray,
         baseline: Optional[np.ndarray] = None,
+        baseline_weights: Optional[np.ndarray] = None,
         target: Optional[int] = None,
         batch_size: Optional[int] = None,
+        baseline_batch_size: Optional[int] = None,
     ):
         """
         Compute exact feature attributions with additivity diagnostics.
@@ -471,30 +563,36 @@ class TreeIG:
         ``attribute`` is faster.
         """
         arrays = self._resolve_arrays_for_target(target)
-        b = self._resolve_baseline(baseline, arrays)
-        X_prep = self._prepare_X(X, arrays)
-        y0 = self._get_y0_per_tree(arrays, b)
-
-        resolved_target = arrays.get("target", None)
-        y0_scalar = self._get_baseline_prediction(arrays, b)
-        endpoint_delta = model_predict(self.model, X_prep, resolved_target) - y0_scalar
-
-        batch_size = self._validate_batch_size(batch_size)
-        if batch_size is None or X_prep.shape[0] <= batch_size:
-            return _compute_core(arrays, b, X_prep, self.time_tol, y0, endpoint_delta)
-
-        phis, event_counts = self._attribute_prepared(
-            arrays,
-            b,
-            X_prep,
-            y0,
-            batch_size,
+        baselines, weights = self._resolve_baselines(
+            baseline, baseline_weights, arrays
         )
+        X_prep = self._prepare_X(X, arrays)
+        resolved_target = arrays.get("target", None)
+        baseline_prediction = sum(
+            weights[i] * self._get_baseline_prediction(arrays, baselines[i])
+            for i in range(baselines.shape[0])
+        )
+        endpoint_delta = (
+            model_predict(self.model, X_prep, resolved_target)
+            - baseline_prediction
+        )
+        phis = self.attribute(
+            X_prep, baseline=baselines, baseline_weights=weights,
+            target=target, batch_size=batch_size,
+            baseline_batch_size=baseline_batch_size,
+        )
+        event_counts = np.zeros(X_prep.shape[0], dtype=np.float64)
+        for i, b in enumerate(baselines):
+            y0 = self._get_y0_per_tree(arrays, b)
+            _, counts = self._attribute_prepared(
+                arrays, b, X_prep, y0, batch_size
+            )
+            event_counts += weights[i] * counts
         residuals = phis.sum(axis=1) - endpoint_delta
 
         infos = [
             {
-                "n_events": int(event_counts[i]),
+                "n_events": float(event_counts[i]),
                 "endpoint_delta": float(endpoint_delta[i]),
                 "attribution_sum": float(phis[i].sum()),
                 "residual": float(residuals[i]),
@@ -509,7 +607,9 @@ class TreeIG:
             "max_abs_residual": float(np.max(np.abs(residuals))),
             "mean_events": float(np.mean(event_counts)),
             "median_events": float(np.median(event_counts)),
-            "max_events": int(np.max(event_counts)),
+            "max_events": float(np.max(event_counts)),
+            "baseline_prediction": float(baseline_prediction),
+            "n_baselines": int(baselines.shape[0]),
         }
 
         return phis, infos, summary
@@ -533,9 +633,13 @@ class TreeIG:
         X : array-like of shape (n_samples, n_features)
             Evaluation inputs.
 
-        baseline : array-like of shape (n_features,), optional
-            Baseline input. If omitted, the default baseline supplied at
-            construction is used.
+        baseline : array-like of shape (n_features,) or (n_baselines, n_features), optional
+            Baseline input or baseline distribution. If omitted, the default
+            baseline supplied at construction is used.
+
+        baseline_weights : array-like of shape (n_baselines,), optional
+            Nonnegative baseline weights. They are normalized internally.
+            Omit for a single baseline or equal weighting.
 
         target : int or None, default=None
             Scalar model-output target.
@@ -608,6 +712,7 @@ class TreeIG:
         X: np.ndarray,
         y: np.ndarray,
         baseline: Optional[np.ndarray] = None,
+        baseline_weights: Optional[np.ndarray] = None,
         loss: str = "squared_error",
         target: Optional[int] = None,
         batch_size: Optional[int] = None,
@@ -630,9 +735,13 @@ class TreeIG:
             are interpreted as numeric outcomes. For ``loss="log_loss"``,
             values must be binary labels in ``{0, 1}``.
 
-        baseline : array-like of shape (n_features,), optional
-            Baseline input. If omitted, the default baseline supplied at
-            construction is used.
+        baseline : array-like of shape (n_features,) or (n_baselines, n_features), optional
+            Baseline input or distribution. If omitted, the default baseline
+            supplied at construction is used.
+
+        baseline_weights : array-like of shape (n_baselines,), optional
+            Nonnegative weights, normalized internally. If omitted, multiple
+            baseline rows receive equal weight.
 
         loss : {"squared_error", "log_loss"}, default="squared_error"
             Loss function used to measure improvement. ``"log_loss"`` is
@@ -695,9 +804,11 @@ class TreeIG:
             raise NotImplementedError(
                 "Only squared_error and binary log_loss are implemented initially."
             )
-    
+
         arrays = self._resolve_arrays_for_target(target)
-        b = self._resolve_baseline(baseline, arrays)
+        baselines, weights = self._resolve_baselines(
+            baseline, baseline_weights, arrays
+        )
         X_prep = self._prepare_X(X, arrays)
         y_arr = np.asarray(y, dtype=np.float64).reshape(-1)
     
@@ -710,23 +821,27 @@ class TreeIG:
         if y_arr.shape[0] != X_prep.shape[0]:
             raise ValueError("y and X must have the same number of observations.")
     
-        y0 = self._get_y0_per_tree(arrays, b)
-    
         resolved_target = arrays.get("target", None)
-        baseline_prediction = self._get_baseline_prediction(arrays, b)
+        baseline_predictions = np.asarray(
+            model_predict(self.model, baselines, resolved_target), dtype=float
+        ).reshape(-1)
         endpoint_prediction = model_predict(self.model, X_prep, resolved_target)
-    
-        obs_values, baseline_losses, model_losses = _loss_reduction_batch(
-            arrays,
-            b,
-            X_prep,
-            y_arr,
-            self.time_tol,
-            y0,
-            baseline_prediction,
-            endpoint_prediction,
-            loss,
-        )
+        if baselines.shape[0] == 1:
+            y0 = self._get_y0_per_tree(arrays, baselines[0])
+            obs_values, baseline_losses, model_losses = _loss_reduction_batch(
+                arrays, baselines[0], X_prep, y_arr, self.time_tol, y0,
+                baseline_predictions[0], endpoint_prediction, loss,
+            )
+        else:
+            y0 = _compute_y0_per_baseline_tree(arrays, baselines)
+            obs_values, baseline_losses, model_losses = (
+                _loss_reduction_weighted_batch(
+                    arrays, baselines, weights, X_prep, y_arr, self.time_tol,
+                    y0, baseline_predictions, endpoint_prediction, loss,
+                )
+            )
+
+        baseline_prediction = float(np.dot(weights, baseline_predictions))
     
         return {
             "observation_values": obs_values,
@@ -736,6 +851,8 @@ class TreeIG:
             "model_loss": float(np.mean(model_losses)),
             "total": float(np.mean(baseline_losses) - np.mean(model_losses)),
             "baseline_prediction": baseline_prediction,
+            "baseline_predictions": baseline_predictions,
+            "baseline_weights": weights,
             "endpoint_prediction": endpoint_prediction,
             "loss": loss,
         }
@@ -745,6 +862,7 @@ class TreeIG:
         X: np.ndarray,
         y: np.ndarray,
         baseline: Optional[np.ndarray] = None,
+        baseline_weights: Optional[np.ndarray] = None,
         n_classes: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
@@ -764,9 +882,12 @@ class TreeIG:
             Integer class labels. Labels must be nonnegative. The labels are
             interpreted as class indices.
 
-        baseline : array-like of shape (n_features,), optional
-            Baseline input. If omitted, the default baseline supplied at
-            construction is used.
+        baseline : array-like of shape (n_features,) or (n_baselines, n_features), optional
+            Baseline input or distribution. If omitted, the default baseline
+            supplied at construction is used.
+
+        baseline_weights : array-like of shape (n_baselines,), optional
+            Nonnegative weights, normalized internally.
 
         n_classes : int or None, default=None
             Number of classes. If omitted, ``len(model.classes_)`` is used.
@@ -824,6 +945,46 @@ class TreeIG:
                 )
 
             n_classes = int(len(classes))
+
+        baselines, weights = self._resolve_baselines(
+            baseline, baseline_weights, self._arrays
+        )
+        if baselines.shape[0] > 1:
+            arrays_by_class = [
+                self._resolve_arrays_for_target(k) for k in range(n_classes)
+            ]
+            y0 = np.stack([
+                _compute_y0_per_baseline_tree(arrays_k, baselines)
+                for arrays_k in arrays_by_class
+            ], axis=1)
+            baseline_scores = np.column_stack([
+                model_predict(self.model, baselines, k)
+                for k in range(n_classes)
+            ])
+            endpoint_scores = np.column_stack([
+                model_predict(self.model, X_prep, k)
+                for k in range(n_classes)
+            ])
+            observation_values, baseline_losses, model_losses = (
+                _loss_reduction_weighted_multiclass_trees(
+                    arrays_by_class, baselines, weights, X_prep, y_arr, y0,
+                    baseline_scores, endpoint_scores, self.time_tol,
+                )
+            )
+            baseline_loss = float(np.mean(baseline_losses))
+            model_loss = float(np.mean(model_losses))
+            return {
+                "observation_values": observation_values,
+                "values": observation_values.mean(axis=0),
+                "standard_errors": _mean_standard_errors(observation_values),
+                "baseline_loss": baseline_loss,
+                "model_loss": model_loss,
+                "total": float(baseline_loss - model_loss),
+                "baseline_scores": baseline_scores,
+                "baseline_weights": weights,
+                "loss": "multiclass_log_loss",
+            }
+        baseline = baselines[0]
 
         baseline_scores = np.empty(n_classes, dtype=np.float64)
         endpoint_scores = np.empty(
