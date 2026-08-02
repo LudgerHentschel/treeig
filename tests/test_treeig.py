@@ -36,7 +36,7 @@ import pytest
 import numpy as np
 import pytest
 
-from treeig import TreeIG
+from treeig import TreeIG, supports
 
 # ---------------------------------------------------------------------
 # Utilities
@@ -84,6 +84,19 @@ def make_multiclass_classification_data(n=260, p=5, k=3, seed=2):
 
 def finite_baseline(X):
     return X.mean(axis=0)
+
+
+def test_public_support_detection_and_model_output():
+    from sklearn.linear_model import LinearRegression
+    from sklearn.tree import DecisionTreeRegressor
+
+    X, y = make_regression_data(n=50, p=5, seed=120)
+    tree = DecisionTreeRegressor(max_depth=3, random_state=120).fit(X, y)
+    linear = LinearRegression().fit(X, y)
+
+    assert supports(tree)
+    assert not supports(linear)
+    np.testing.assert_allclose(TreeIG(tree).model_output(X[:6]), tree.predict(X[:6]))
 
 
 def assert_completeness(model, X, x0, target=None, atol=1e-8, rtol=1e-8):

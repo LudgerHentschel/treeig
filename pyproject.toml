@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "treeig"
-version = "0.1.7"
+version = "0.1.8"
 description = "Exact Integrated Gradients for tree ensembles."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 license = "BSD-3-Clause"
 license-files = ["LICENSE"]
 
@@ -31,6 +31,7 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",

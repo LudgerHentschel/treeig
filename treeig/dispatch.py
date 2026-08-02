@@ -23,6 +23,34 @@ from .xgboost_backend import (
 )
 
 
+def supports_model(model: Any) -> bool:
+    """Return whether ``model`` has an exact TreeIG backend."""
+    try:
+        from sklearn.ensemble import (
+            ExtraTreesRegressor,
+            GradientBoostingClassifier,
+            GradientBoostingRegressor,
+            RandomForestRegressor,
+        )
+        from sklearn.tree import DecisionTreeRegressor
+    except ImportError:
+        sklearn_types = ()
+    else:
+        sklearn_types = (
+            DecisionTreeRegressor,
+            ExtraTreesRegressor,
+            GradientBoostingClassifier,
+            GradientBoostingRegressor,
+            RandomForestRegressor,
+        )
+
+    return (
+        isinstance(model, sklearn_types)
+        or _xgboost_model_kind(model) is not None
+        or _lightgbm_model_kind(model) is not None
+    )
+
+
 def extract_tree_arrays(model: Any, target: Optional[int] = None) -> Dict[str, Any]:
     """Extract supported tree models into the common TreeIG internal format."""
     try:

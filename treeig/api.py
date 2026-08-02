@@ -494,6 +494,19 @@ class TreeIG:
             return weighted, np.stack(by_baseline, axis=0)
         return weighted
 
+    def model_output(
+        self,
+        X: np.ndarray,
+        target: Optional[int] = None,
+    ) -> np.ndarray:
+        """Return the scalar model output that TreeIG attributes."""
+        arrays = self._resolve_arrays_for_target(target)
+        X_prep = self._prepare_X(X, arrays)
+        return np.asarray(
+            model_predict(self.model, X_prep, arrays.get("target", None)),
+            dtype=np.float64,
+        )
+
     def explain(
         self,
         X: np.ndarray,

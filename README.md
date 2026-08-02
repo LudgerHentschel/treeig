@@ -55,6 +55,13 @@ ig = tig.TreeIG(model, baseline=x0)
 phi = ig.attribute(X_eval)
 ```
 
+For libraries integrating TreeIG, the public adapter surface also includes:
+
+```python
+tig.supports(model)                       # exact backend availability
+ig.model_output(X_eval)                   # scalar output being attributed
+```
+
 The single-vector example above is the minimal API. For substantive
 attribution, prefer a prediction-neutral distribution constructed with
 [CBaseline](https://github.com/lhentschel/cbaseline).
