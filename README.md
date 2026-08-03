@@ -87,7 +87,7 @@ aggregation inside a compiled loop. With `return_by_baseline=True`,
 `attribute` returns `(weighted, by_baseline)` for diagnostics.
 
 Compiled baseline traversal is also used by `loss_attribution` and
-`multiclass_loss_attribution`, including tree-based EDEF. For multiclass log
+`multiclass_loss_attribution`. For multiclass log
 loss, TreeIG merges class-score events in chronological path order before
 applying each softmax-loss change. Pass the complete baseline distribution in
 one call instead of invoking the explainer once per baseline: this amortizes

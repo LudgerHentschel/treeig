@@ -638,7 +638,7 @@ class TreeIG:
 
         This advanced method exposes the event representation used internally
         by TreeIG. It is intended for downstream scalar-functional
-        attribution, including EDEF-style decompositions. It returns path
+        attribution, including loss-based decompositions. It returns path
         events rather than feature attribution sums.
 
         Parameters
