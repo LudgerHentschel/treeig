@@ -37,9 +37,12 @@ interpretation of the reference prediction `f0`.
 ```bash
 pip install treeig
 pip install cbaseline  # recommended baseline construction
+pip install "treeig[catboost]"  # optional numerical CatBoost support
 ```
 
-Requires Python ≥ 3.9, NumPy, and Numba. Model backends (scikit-learn, XGBoost, LightGBM) are not installed automatically; install whichever you use.
+Requires Python ≥ 3.9, NumPy, and Numba. Model backends (scikit-learn,
+XGBoost, LightGBM, and CatBoost) are not installed automatically; install
+whichever you use.
 
 ## Quickstart
 
@@ -60,6 +63,9 @@ For libraries integrating TreeIG, the public adapter surface also includes:
 ```python
 tig.supports(model)                       # exact backend availability
 ig.model_output(X_eval)                   # scalar output being attributed
+
+numeric = tig.TreeIGNumeric(model, baseline=x0)
+numeric.model_output(X_eval)              # numeric backend output scale
 ```
 
 The single-vector example above is the minimal API. For substantive
@@ -214,6 +220,7 @@ import treeig as tig
 
 ig = tig.TreeIGNumeric(model, baseline=x0)
 phi, infos, summary = ig.explain(X_eval)
+output = ig.model_output(X_eval)
 
 print(summary["mean_abs_residual"])
 ```

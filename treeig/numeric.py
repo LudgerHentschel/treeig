@@ -863,6 +863,31 @@ class TreeIGNumeric:
         phi, _ = self._engine.attribute(self.baseline, X)
         return phi
 
+    def model_output(self, X) -> ArrayF:
+        """Return the scalar model output attributed by this explainer.
+
+        The output scale follows the model adapter: raw margins are preferred
+        for classifiers, probabilities are used only when no margin interface
+        exists, and regressors use their predictions. ``target`` selection is
+        the same as for :meth:`attribute`.
+        """
+
+        X = np.atleast_2d(np.asarray(X, dtype=float))
+        if X.ndim != 2 or X.shape[1] != self.baseline.size:
+            raise ValueError(
+                f"X must have shape (n_observations, {self.baseline.size})"
+            )
+        if X.shape[0] == 0:
+            raise ValueError("X must contain at least one observation")
+        if not np.isfinite(X).all():
+            raise ValueError("inputs must be finite; NaN/Inf not supported")
+        output = np.asarray(self._f(X), dtype=float).ravel()
+        if output.shape != (X.shape[0],):
+            raise ValueError("model output must contain one scalar per observation")
+        if not np.isfinite(output).all():
+            raise ValueError("model output must contain only finite values")
+        return output
+
     def explain(self, X):
         phi, infos = self._engine.attribute(self.baseline, X)
         return phi, infos, _summarize(infos)

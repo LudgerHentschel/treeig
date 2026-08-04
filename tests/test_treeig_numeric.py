@@ -2,8 +2,9 @@
 piecewise-constant functions directly to NumericEngine."""
 
 import numpy as np
+import pytest
 
-from treeig.numeric import NumericEngine
+from treeig.numeric import NumericEngine, TreeIGNumeric
 
 
 def step(v, thr, lo, hi):
@@ -100,6 +101,40 @@ def test_completeness_random_forest_like():
     assert np.allclose(phi.sum(axis=1), delta, atol=1e-10)
     print("forest-like max abs residual:",
           max(d["abs_residual"] for d in infos))
+
+
+def test_public_numeric_model_output_matches_attributed_quantity():
+    class StepRegressor:
+        def predict(self, X):
+            return np.where(X[:, 0] >= 0.4, 3.0, -1.0)
+
+    model = StepRegressor()
+    explainer = TreeIGNumeric(model, baseline=np.zeros(2), grid_size=32)
+    X = np.array([[0.2, 1.0], [0.8, -0.5]])
+
+    output = explainer.model_output(X)
+    phi = explainer.attribute(X)
+
+    np.testing.assert_allclose(output, model.predict(X))
+    np.testing.assert_allclose(
+        phi.sum(axis=1) + explainer.model_output(np.zeros((1, 2)))[0],
+        output,
+    )
+
+
+def test_public_numeric_model_output_validates_inputs():
+    class StepRegressor:
+        def predict(self, X):
+            return np.zeros(X.shape[0])
+
+    explainer = TreeIGNumeric(StepRegressor(), baseline=np.zeros(2))
+
+    with pytest.raises(ValueError, match="shape"):
+        explainer.model_output([[1.0, 2.0, 3.0]])
+    with pytest.raises(ValueError, match="at least one"):
+        explainer.model_output(np.empty((0, 2)))
+    with pytest.raises(ValueError, match="finite"):
+        explainer.model_output([[np.nan, 0.0]])
 
 
 if __name__ == "__main__":
