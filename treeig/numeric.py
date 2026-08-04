@@ -59,15 +59,14 @@ class NumericEngine:
     Model-free core of ``TreeIGNumeric``. Detects prediction jumps along the
     straight-line path by a batched grid scan, then identifies the responsible
     feature for each jump by a *batched binary search* over feature indices:
-    ~log2(p) group probes per event instead of p single-feature probes. Events
-    that do not resolve to a single feature (coincident or interacting
-    crossings) fall back to the ordered cumulative sweep, which preserves
-    completeness.
+    ~log2(p) group probes per event instead of p single-feature probes. Changed
+    intervals are subdivided adaptively before feature identification. Truly
+    coincident, interacting, or still-unresolved crossings fall back to an
+    ordered cumulative sweep, which preserves completeness.
 
-    Public surface (constructor signature, ``attribute`` contract, ``infos``
-    keys) is unchanged. ``max_refine`` and ``t_min`` are accepted for backward
-    compatibility but unused. ``atom_chunk`` now bounds a ``(chunk, p)`` probe
-    array (not ``(chunk, p, p)``), so its default is larger than before.
+    The initial grid scan, adaptive subdivision, and feature search are
+    batched. Only intervals whose endpoints differ are subdivided.
+    ``atom_chunk`` bounds batches of interval probes.
 
     Parameters
     ----------
@@ -77,8 +76,11 @@ class NumericEngine:
         Number of input features ``p``.
     grid_size : int, default=1024
         Number of path intervals scanned for prediction changes.
-    max_refine, t_min :
-        Accepted for compatibility; unused.
+    max_refine : int, default=4
+        Maximum bisection depth for changed intervals. Set to zero to disable
+        adaptive refinement.
+    t_min : float, default=1e-9
+        Minimum path-time width for adaptive refinement.
     tol : float, default=0.0
         Tolerance for comparing scalar predictions.
     warn_residual : bool, default=True
@@ -93,7 +95,7 @@ class NumericEngine:
         n_features,
         *,
         grid_size: int = 1024,
-        max_refine: int = 20,
+        max_refine: int = 4,
         t_min: float = 1e-9,
         tol: float = 0.0,
         warn_residual: bool = True,
@@ -103,8 +105,8 @@ class NumericEngine:
         self.f = f
         self.p = int(n_features)
         self.grid_size = int(grid_size)
-        self.max_refine = int(max_refine)  # accepted, unused
-        self.t_min = float(t_min)          # accepted, unused
+        self.max_refine = int(max_refine)
+        self.t_min = float(t_min)
         self.tol = float(tol)
         self.warn_residual = bool(warn_residual)
         self.obs_chunk = int(obs_chunk)
@@ -160,15 +162,28 @@ class NumericEngine:
         endpoint_delta = V[:, -1] - V[:, 0]
         changed = np.abs(V[:, 1:] - V[:, :-1]) > tol
 
-        coincident = np.zeros(nc, dtype=int)
+        refined_counts = np.zeros(nc, dtype=int)
+        max_refinement_depth = np.zeros(nc, dtype=int)
+        unresolved_counts = np.zeros(nc, dtype=int)
         ii, kk = np.nonzero(changed)
 
         if ii.size:
             fa = V[ii, kk]
             fb = V[ii, kk + 1]
-            delta = fb - fa
             x_minus = x0[None, :] + T[kk][:, None] * diff[ii]
             x_plus = x0[None, :] + T[kk + 1][:, None] * diff[ii]
+            (
+                ii,
+                x_minus,
+                x_plus,
+                fa,
+                fb,
+                refined_counts,
+                max_refinement_depth,
+            ) = self._refine_changed_intervals(
+                ii, x_minus, x_plus, fa, fb, nc
+            )
+            delta = fb - fa
             A = ii.size
 
             # pass 2: batched binary search for the responsible feature.
@@ -212,34 +227,96 @@ class NumericEngine:
                 np.add.at(phi_c, (ii[good], lo[good]), delta[good])
                 bad[sel[~ok]] = True
 
-            # fallback for coincident / interacting events
+            # Truly coincident or still-unresolved events retain the
+            # deterministic cumulative sweep after refinement.
             for a in np.nonzero(bad)[0]:
                 obs = ii[a]
-                coincident[obs] += 1
-                self._sweep(x_minus[a], x_plus[a], fa[a], diff[obs], obs, phi_c)
+                unresolved_counts[obs] += 1
+                self._sweep(
+                    x_minus[a], x_plus[a], fa[a], diff[obs], obs, phi_c
+                )
 
-        counts = np.bincount(ii, minlength=nc) if ii.size else np.zeros(nc, int)
+        event_counts = (
+            np.bincount(ii, minlength=nc)
+            if ii.size
+            else np.zeros(nc, int)
+        )
         attr_sum = phi_c.sum(axis=1)
         for i in range(nc):
             res = float(attr_sum[i] - endpoint_delta[i])
             abs_res = abs(res)
             infos[base + i] = {
-                "n_events": int(counts[i]),
+                "n_events": int(event_counts[i]),
                 "endpoint_delta": float(endpoint_delta[i]),
                 "attribution_sum": float(attr_sum[i]),
                 "residual": res,
                 "abs_residual": abs_res,
                 "engine": "numeric",
-                "n_coincident_events": int(coincident[i]),
+                "n_coincident_events": int(unresolved_counts[i]),
+                "n_refined_intervals": int(refined_counts[i]),
+                "max_refinement_depth": int(max_refinement_depth[i]),
+                "n_unresolved_intervals": int(unresolved_counts[i]),
             }
             if self.warn_residual and abs_res > tol:
                 warnings.warn(
                     "TreeIGNumeric did not recover f(x) - f(x0) within "
-                    "tolerance. Increase grid_size or use structure-based "
-                    "TreeIG when available.",
+                    "tolerance. Increase grid_size/max_refine or use "
+                    "structure-based TreeIG when available.",
                     RuntimeWarning,
                     stacklevel=2,
                 )
+
+    def _refine_changed_intervals(self, ii, xm, xp, fa, fb, n_obs):
+        """Bisect changed intervals in batched adaptive levels."""
+        refined = np.zeros(n_obs, dtype=int)
+        max_depth = np.zeros(n_obs, dtype=int)
+        settled = []
+        width = 1.0 / self.grid_size
+
+        for depth in range(self.max_refine):
+            if ii.size == 0 or width <= self.t_min:
+                break
+            midpoint = 0.5 * (xm + xp)
+            fm = np.empty(ii.size, dtype=float)
+            for start in range(0, ii.size, self.atom_chunk):
+                stop = min(start + self.atom_chunk, ii.size)
+                fm[start:stop] = np.asarray(
+                    self.f(midpoint[start:stop]), dtype=float
+                ).ravel()
+
+            np.add.at(refined, ii, 1)
+            max_depth[np.unique(ii)] = depth + 1
+            left = np.abs(fm - fa) > self.tol
+            right = np.abs(fb - fm) > self.tol
+            neither = ~(left | right)
+            if np.any(neither):
+                settled.append(
+                    (
+                        ii[neither],
+                        xm[neither],
+                        xp[neither],
+                        fa[neither],
+                        fb[neither],
+                    )
+                )
+
+            ii = np.concatenate((ii[left], ii[right]))
+            xm = np.concatenate((xm[left], midpoint[right]), axis=0)
+            xp = np.concatenate((midpoint[left], xp[right]), axis=0)
+            fa = np.concatenate((fa[left], fm[right]))
+            fb = np.concatenate((fm[left], fb[right]))
+            width *= 0.5
+
+        settled.append((ii, xm, xp, fa, fb))
+        return (
+            np.concatenate([part[0] for part in settled]),
+            np.concatenate([part[1] for part in settled], axis=0),
+            np.concatenate([part[2] for part in settled], axis=0),
+            np.concatenate([part[3] for part in settled]),
+            np.concatenate([part[4] for part in settled]),
+            refined,
+            max_depth,
+        )
 
     def _sweep(self, xm, xp, fa, diff_row, row, phi_c):
         moving = np.flatnonzero(diff_row != 0.0)
@@ -883,6 +960,15 @@ def _summarize(infos: List[Dict]) -> Dict:
     abs_res = np.array([d["abs_residual"] for d in infos], dtype=float)
     n_ev = np.array([d["n_events"] for d in infos], dtype=float)
     n_co = np.array([d["n_coincident_events"] for d in infos], dtype=float)
+    n_ref = np.array(
+        [d.get("n_refined_intervals", 0) for d in infos], dtype=float
+    )
+    n_un = np.array(
+        [d.get("n_unresolved_intervals", 0) for d in infos], dtype=float
+    )
+    depths = np.array(
+        [d.get("max_refinement_depth", 0) for d in infos], dtype=float
+    )
 
     return {
         "engine": "numeric",
@@ -891,6 +977,9 @@ def _summarize(infos: List[Dict]) -> Dict:
         "mean_abs_residual": float(abs_res.mean()) if abs_res.size else 0.0,
         "mean_n_events": float(n_ev.mean()) if n_ev.size else 0.0,
         "total_coincident_events": int(n_co.sum()),
+        "total_refined_intervals": int(n_ref.sum()),
+        "total_unresolved_intervals": int(n_un.sum()),
+        "max_refinement_depth": int(depths.max()) if depths.size else 0,
     }
 
 

@@ -193,7 +193,9 @@ def _fit(scenario: Scenario, seed: int, n_eval: int):
     return model, X[n_train : n_train + n_eval], X[n_train + n_eval :]
 
 
-def _numeric(model, baseline, data, floor: float, grid_size: int):
+def _numeric(
+    model, baseline, data, floor: float, grid_size: int, max_refine: int
+):
     targets: Sequence[Optional[int]]
     targets = (
         (None,)
@@ -213,6 +215,7 @@ def _numeric(model, baseline, data, floor: float, grid_size: int):
                 probability_to_score=True,
                 probability_floor=floor,
                 grid_size=grid_size,
+                max_refine=max_refine,
                 warn_residual=False,
             )
         phi, target_infos, _ = explainer.explain(data[None, :])
@@ -228,6 +231,7 @@ def benchmark(
     n_eval: int,
     floor: float,
     seed: int,
+    max_refine: int,
 ) -> List[dict]:
     model, baselines, observations = _fit(scenario, seed, n_eval)
     oracles = [
@@ -237,7 +241,9 @@ def benchmark(
     rows = []
     for grid_size in grids:
         # Exclude one-time optional-backend imports from steady-state timing.
-        _numeric(model, baselines[0], observations[0], floor, grid_size)
+        _numeric(
+            model, baselines[0], observations[0], floor, grid_size, max_refine
+        )
         allocation_errors = []
         relative_errors = []
         completeness = []
@@ -246,7 +252,7 @@ def benchmark(
         for baseline, data, oracle in zip(baselines, observations, oracles):
             expected, oracle_events, tied_events, _ = oracle
             actual, infos, duration = _numeric(
-                model, baseline, data, floor, grid_size
+                model, baseline, data, floor, grid_size, max_refine
             )
             elapsed += duration
             if tied_events == 0:
@@ -273,6 +279,7 @@ def benchmark(
             {
                 "scenario": scenario.name,
                 "grid": grid_size,
+                "refine": max_refine,
                 "features": scenario.n_features,
                 "trees": scenario.n_estimators,
                 "depth": (
@@ -294,15 +301,26 @@ def benchmark(
 
 def _print_rows(rows: Sequence[dict]) -> None:
     headings = (
-        "scenario", "grid", "features", "trees", "depth", "classes",
-        "max allocation error", "max relative L1 error",
-        "max completeness error", "missed events", "zero paths", "ms/path",
+        "scenario",
+        "grid",
+        "refine",
+        "features",
+        "trees",
+        "depth",
+        "classes",
+        "max allocation error",
+        "max relative L1 error",
+        "max completeness error",
+        "missed events",
+        "zero paths",
+        "ms/path",
     )
     print("| " + " | ".join(headings) + " |")
     print("|" + "|".join("---" for _ in headings) + "|")
     for row in rows:
         print(
-            "| {scenario} | {grid} | {features} | {trees} | {depth} | "
+            "| {scenario} | {grid} | {refine} | {features} | {trees} | "
+            "{depth} | "
             "{classes} | {max_allocation_error:.3g} | "
             "{max_relative_l1_error:.2%} | "
             "{max_completeness_error:.3g} | "
@@ -318,14 +336,19 @@ def main() -> None:
     parser.add_argument("--eval", type=int, default=8, dest="n_eval")
     parser.add_argument("--floor", type=float, default=1e-6)
     parser.add_argument("--seed", type=int, default=2026)
+    parser.add_argument("--max-refine", type=int, default=4)
     parser.add_argument(
         "--scenarios",
         nargs="+",
         help="run only the named scenarios from the selected profile",
     )
     args = parser.parse_args()
-    if args.n_eval < 1 or any(grid < 1 for grid in args.grids):
-        parser.error("--eval and every --grids value must be positive")
+    if (
+        args.n_eval < 1
+        or args.max_refine < 0
+        or any(grid < 1 for grid in args.grids)
+    ):
+        parser.error("--eval/grids must be positive and --max-refine nonnegative")
     scenarios = QUICK_SCENARIOS if args.profile == "quick" else FULL_SCENARIOS
     if args.scenarios:
         requested = set(args.scenarios)
@@ -339,7 +362,14 @@ def main() -> None:
     rows = []
     for scenario in scenarios:
         rows.extend(
-            benchmark(scenario, args.grids, args.n_eval, args.floor, args.seed)
+            benchmark(
+                scenario,
+                args.grids,
+                args.n_eval,
+                args.floor,
+                args.seed,
+                args.max_refine,
+            )
         )
     _print_rows(rows)
 

@@ -70,6 +70,45 @@ def test_conjunction_coincident():
           "coincident", infos[0]["n_coincident_events"])
 
 
+def test_adaptive_refinement_separates_nearby_interacting_crossings():
+    # Feature 1 crosses first but changes the output only after feature 0 also
+    # crosses. A coarse deterministic sweep assigns the jump to feature 1;
+    # adaptive refinement localizes the actual output event to feature 0.
+    def f(P):
+        return np.where(
+            (P[:, 0] >= 0.5002) & (P[:, 1] >= 0.5001), 7.0, 0.0
+        )
+
+    fixed = NumericEngine(f, n_features=2, grid_size=16, max_refine=0)
+    adaptive = NumericEngine(f, n_features=2, grid_size=16, max_refine=16)
+    baseline = np.zeros(2)
+    data = np.ones((1, 2))
+
+    fixed_phi, fixed_info = fixed.attribute(baseline, data)
+    adaptive_phi, adaptive_info = adaptive.attribute(baseline, data)
+
+    np.testing.assert_allclose(fixed_phi[0], [0.0, 7.0])
+    np.testing.assert_allclose(adaptive_phi[0], [7.0, 0.0])
+    assert fixed_info[0]["n_unresolved_intervals"] == 1
+    assert adaptive_info[0]["n_refined_intervals"] > 0
+    assert adaptive_info[0]["max_refinement_depth"] > 0
+    assert adaptive_info[0]["n_unresolved_intervals"] == 0
+
+
+def test_adaptive_refinement_stops_for_exact_coincidence():
+    def f(P):
+        return np.where(
+            (P[:, 0] >= 0.5) & (P[:, 1] >= 0.5), 7.0, 0.0
+        )
+
+    eng = NumericEngine(f, n_features=2, grid_size=16, max_refine=4)
+    phi, infos = eng.attribute(np.zeros(2), np.ones((1, 2)))
+
+    assert phi[0].sum() == 7.0
+    assert infos[0]["max_refinement_depth"] == 4
+    assert infos[0]["n_unresolved_intervals"] == 1
+
+
 def test_non_moving_feature_zero():
     # feature 1 does not move (x == x0); must receive zero
     f = lambda P: step(P[:, 0], 0.5, 0.0, 4.0) + step(P[:, 1], 0.5, 0.0, 9.0)

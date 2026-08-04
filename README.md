@@ -199,18 +199,21 @@ piecewise-constant models the exact parser does not support. Whenever a
 supported backend is available, exact TreeIG should be preferred.
 
 TreeIGNumeric scans a numerical grid along the integration path to locate
-changes in the prediction, then uses local axis-aligned probes at each detected
-change to attribute the step to a feature. It preserves completeness for the
-detected changes and typically produces attributions very similar to exact
-TreeIG. Because it locates crossings numerically, multiple nearby crossings may
-occasionally be merged into a single event; exact TreeIG avoids this by
-enumerating crossings directly from the tree structure.
+changes in the prediction. It then bisects only the changed intervals, four
+adaptive levels by default, before using local axis-aligned probes to attribute
+each step to a feature. It preserves completeness for the detected changes and
+typically produces attributions very similar to exact TreeIG. Because it
+locates crossings numerically, multiple nearby crossings may occasionally be
+merged into a single event; exact TreeIG avoids this by enumerating crossings
+directly from the tree structure.
 
-The default `grid_size=1024` is a practical starting point, not an accuracy
-guarantee. Completeness can remain exact when nearby events are merged because
-the merged jumps still telescope. For allocation-sensitive work, rerun a
-representative subset at a larger grid such as 4,096 or 8,192 and compare the
-feature attributions themselves. The reproducible
+The defaults `grid_size=1024` and `max_refine=4` are a practical balance, not
+an accuracy guarantee. Refinement concentrates additional evaluations around
+detected changes without increasing the global grid. Completeness can remain
+exact when offsetting events are hidden inside one coarse interval because the
+detected jumps still telescope. For allocation-sensitive work, rerun a
+representative subset at a larger grid and compare the feature attributions
+themselves. The reproducible
 [probability-forest stress benchmark](benchmarks/README.md) performs this
 resolution check against an independent structural crossing oracle.
 
@@ -288,9 +291,10 @@ Each entry in `infos` contains diagnostics for one observation:
 ```
 
 TreeIGNumeric returns the same fields plus `n_coincident_events`, the number of
-events at which multiple crossings were merged and allocated by the fallback
-rule. The `summary` dictionary reports aggregate residual and event-count
-statistics.
+events that remained unresolved and were allocated by the fallback rule. It
+also reports `n_refined_intervals`, `max_refinement_depth`, and
+`n_unresolved_intervals`. The `summary` dictionary aggregates these refinement,
+residual, and event-count diagnostics.
 
 ## Classification targets
 

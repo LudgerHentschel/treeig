@@ -28,8 +28,17 @@ L1 allocation error, maximum completeness error, the fraction of structural
 output events merged by the numerical grid, the fraction of paths encountering
 an exact zero class probability, and runtime per baseline-to-input path.
 Individual scenarios can be selected with `--scenarios reference multiclass`.
+Set `--max-refine 0` to reproduce fixed-grid behavior without adaptive
+subdivision.
 Results depend on the fitted models and hardware; rerun the benchmark when
 changing numerical-event logic or defaults.
+
+With CatBoost installed, compare fixed and adaptive grids against a
+high-resolution raw-score reference:
+
+```bash
+python -m benchmarks.catboost_adaptive
+```
 
 ## Representative findings
 
@@ -59,7 +68,19 @@ used four paths.
   forests to 35--47 ms for four-class forests and 130--180 ms for 200-tree
   forests. The 500-tree stress case took about 1.65 seconds per path.
 
-These results support 1,024 as a practical default with an explicit convergence
-check for important work. They also motivate adaptive refinement of intervals
-that appear to contain multiple events; that is preferable to continually
-raising the global grid and its memory cost.
+These fixed-grid results motivated the adaptive subdivision introduced in
+TreeIG 0.1.11. With four refinement levels and the same 1,024-point global
+grid, the reference, wide, ExtraTrees, and four-class scenarios fell to zero or
+near-zero oracle error in the representative seed. The large forest improved
+slightly; errors caused by exactly offsetting events inside an unchanged coarse
+interval were, as expected, unaffected.
+
+Across three CatBoost seeds, the 1,024-point adaptive method matched an
+8,192-point raw-score reference to displayed precision for both regression and
+four-class classification. A 128-point adaptive scan was already exact in two
+seeds and had at most 1.4% relative L1 error in the third. Adaptive evaluation
+was generally faster than fixed-grid evaluation because it avoided expensive
+unresolved-event sweeps.
+
+These results support `grid_size=1024` and `max_refine=4` as practical defaults
+with an explicit convergence check for important probability-forest work.
