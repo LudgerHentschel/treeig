@@ -249,6 +249,12 @@ For binary probabilities, the explained score is
 odds. The floor is applied to every class probability and the probabilities
 are renormalized before taking logarithms.
 
+These are the canonical scores implied by the complete probability vector:
+softmax of the centered log scores recovers the original probabilities. They
+do not reconstruct an unavailable training-time margin. TreeIGNumeric treats
+the derived score itself as the explicitly defined scalar model output and
+attributes its jumps after the ensemble probabilities have been aggregated.
+
 ## Diagnostics
 
 Use `explain` when you want attributions together with completeness
