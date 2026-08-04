@@ -11,8 +11,8 @@ from __future__ import annotations
 import argparse
 import time
 import warnings
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 from sklearn.datasets import make_classification
@@ -27,7 +27,7 @@ class Scenario:
     name: str
     estimator: str
     n_estimators: int
-    max_depth: Optional[int]
+    max_depth: int | None
     n_features: int
     n_classes: int
 
@@ -68,11 +68,11 @@ def _output_scores(model, X: np.ndarray, floor: float) -> np.ndarray:
 
 def _tree_path_crossings(
     estimator, baseline: np.ndarray, data: np.ndarray
-) -> List[Tuple[float, int]]:
+) -> list[tuple[float, int]]:
     """Return every reachable split boundary along one interpolation path."""
     tree = estimator.tree_
     direction = data - baseline
-    crossings: List[Tuple[float, int]] = []
+    crossings: list[tuple[float, int]] = []
 
     def visit(node: int, lower: float, upper: float) -> None:
         feature = int(tree.feature[node])
@@ -117,28 +117,44 @@ def _tree_path_crossings(
 
 def _crossing_map(
     model, baseline: np.ndarray, data: np.ndarray
-) -> Dict[float, Set[int]]:
+) -> dict[float, list[tuple[object, int]]]:
     estimators: Iterable[object]
     if hasattr(model, "estimators_"):
         estimators = np.asarray(model.estimators_, dtype=object).ravel()
     else:
         estimators = (model,)
-    crossings: Dict[float, Set[int]] = {}
+    crossings: dict[float, list[tuple[object, int]]] = {}
     for estimator in estimators:
         for crossing, feature in _tree_path_crossings(estimator, baseline, data):
-            crossings.setdefault(crossing, set()).add(feature)
+            crossings.setdefault(crossing, []).append((estimator, feature))
     return crossings
+
+
+def _effective_leaf_support(
+    transitions: Sequence[tuple[object, int]], points: np.ndarray
+) -> float:
+    """Return mean harmonic leaf support across trees changing at an event."""
+    supports = []
+    for estimator, _ in transitions:
+        leaves = estimator.apply(points)
+        counts = estimator.tree_.weighted_n_node_samples[leaves]
+        left, right = float(counts[0]), float(counts[1])
+        if left > 0.0 and right > 0.0:
+            supports.append(2.0 / (1.0 / left + 1.0 / right))
+    return float(np.mean(supports)) if supports else 0.0
 
 
 def _oracle(
     model, baseline: np.ndarray, data: np.ndarray, floor: float
-) -> Tuple[np.ndarray, int, int, bool]:
+) -> tuple[np.ndarray, int, int, bool, np.ndarray]:
     crossings = _crossing_map(model, baseline, data)
     times = sorted(crossings)
     n_outputs = 1 if len(model.classes_) == 2 else len(model.classes_)
     attribution = np.zeros((data.size, n_outputs))
     active_events = 0
     tied_events = 0
+    support_mass = np.zeros(n_outputs)
+    jump_mass = np.zeros(n_outputs)
 
     representatives = [0.0]
     representatives.extend(
@@ -158,12 +174,37 @@ def _oracle(
         if not np.any(np.abs(jump) > 1e-14):
             continue
         active_events += 1
-        features = crossings[crossing]
+        transitions = crossings[crossing]
+        features = {feature for _, feature in transitions}
+        magnitude = np.abs(jump)
+        support_mass += magnitude * _effective_leaf_support(transitions, points)
+        jump_mass += magnitude
         if len(features) != 1:
             tied_events += 1
             continue
         attribution[next(iter(features))] += jump
-    return attribution, active_events, tied_events, path_has_zero
+    effective_support = np.divide(
+        support_mass,
+        jump_mass,
+        out=np.zeros_like(support_mass),
+        where=jump_mass > 0.0,
+    )
+    return attribution, active_events, tied_events, path_has_zero, effective_support
+
+
+def _support_weighted_relative_error(
+    numerators: Sequence[float],
+    denominators: Sequence[float],
+    supports: Sequence[float],
+) -> float:
+    numerators_array = np.asarray(numerators, dtype=float)
+    denominators_array = np.asarray(denominators, dtype=float)
+    supports_array = np.asarray(supports, dtype=float)
+    if numerators_array.size == 0:
+        return float("nan")
+    numerator = float(np.sum(supports_array * numerators_array))
+    denominator = float(np.sum(supports_array * denominators_array))
+    return numerator / max(denominator, np.finfo(float).eps)
 
 
 def _fit(scenario: Scenario, seed: int, n_eval: int):
@@ -178,7 +219,7 @@ def _fit(scenario: Scenario, seed: int, n_eval: int):
         n_clusters_per_class=1,
         random_state=seed,
     )
-    options = dict(max_depth=scenario.max_depth, random_state=seed)
+    options = {"max_depth": scenario.max_depth, "random_state": seed}
     if scenario.estimator == "tree":
         model = DecisionTreeClassifier(**options)
     elif scenario.estimator == "extra":
@@ -196,7 +237,7 @@ def _fit(scenario: Scenario, seed: int, n_eval: int):
 def _numeric(
     model, baseline, data, floor: float, grid_size: int, max_refine: int
 ):
-    targets: Sequence[Optional[int]]
+    targets: Sequence[int | None]
     targets = (
         (None,)
         if len(model.classes_) == 2
@@ -232,7 +273,7 @@ def benchmark(
     floor: float,
     seed: int,
     max_refine: int,
-) -> List[dict]:
+) -> list[dict]:
     model, baselines, observations = _fit(scenario, seed, n_eval)
     oracles = [
         _oracle(model, baseline, data, floor)
@@ -244,19 +285,20 @@ def benchmark(
         _numeric(
             model, baselines[0], observations[0], floor, grid_size, max_refine
         )
-        allocation_errors = []
         relative_errors = []
+        error_numerators = []
+        error_denominators = []
+        relative_error_supports = []
         completeness = []
         missed_fractions = []
         elapsed = 0.0
         for baseline, data, oracle in zip(baselines, observations, oracles):
-            expected, oracle_events, tied_events, _ = oracle
+            expected, oracle_events, tied_events, _, effective_support = oracle
             actual, infos, duration = _numeric(
                 model, baseline, data, floor, grid_size, max_refine
             )
             elapsed += duration
             if tied_events == 0:
-                allocation_errors.append(float(np.max(np.abs(actual - expected))))
                 for output in range(expected.shape[1]):
                     denominator = float(np.sum(np.abs(expected[:, output])))
                     numerator = float(
@@ -265,6 +307,9 @@ def benchmark(
                     relative_errors.append(
                         numerator / max(denominator, np.finfo(float).eps)
                     )
+                    error_numerators.append(numerator)
+                    error_denominators.append(denominator)
+                    relative_error_supports.append(effective_support[output])
             endpoint_delta = (
                 _output_scores(model, data[None, :], floor)
                 - _output_scores(model, baseline[None, :], floor)
@@ -288,8 +333,24 @@ def benchmark(
                     else "full"
                 ),
                 "classes": scenario.n_classes,
-                "max_allocation_error": max(allocation_errors, default=float("nan")),
-                "max_relative_l1_error": max(relative_errors, default=float("nan")),
+                "median_relative_l1_error": (
+                    float(np.median(relative_errors))
+                    if relative_errors
+                    else float("nan")
+                ),
+                "p95_relative_l1_error": float(
+                    np.percentile(relative_errors, 95)
+                ) if relative_errors else float("nan"),
+                "support_weighted_relative_l1_error": (
+                    _support_weighted_relative_error(
+                        error_numerators,
+                        error_denominators,
+                        relative_error_supports,
+                    )
+                ),
+                "median_effective_leaf_support": float(
+                    np.median(np.concatenate([item[4] for item in oracles]))
+                ),
                 "max_completeness_error": max(completeness),
                 "mean_missed_event_fraction": float(np.mean(missed_fractions)),
                 "zero_path_fraction": float(np.mean([item[3] for item in oracles])),
@@ -308,8 +369,10 @@ def _print_rows(rows: Sequence[dict]) -> None:
         "trees",
         "depth",
         "classes",
-        "max allocation error",
-        "max relative L1 error",
+        "median relative L1 error",
+        "95th pct relative L1 error",
+        "support-weighted relative L1 error",
+        "median effective leaf support",
         "max completeness error",
         "missed events",
         "zero paths",
@@ -321,8 +384,10 @@ def _print_rows(rows: Sequence[dict]) -> None:
         print(
             "| {scenario} | {grid} | {refine} | {features} | {trees} | "
             "{depth} | "
-            "{classes} | {max_allocation_error:.3g} | "
-            "{max_relative_l1_error:.2%} | "
+            "{classes} | {median_relative_l1_error:.2%} | "
+            "{p95_relative_l1_error:.2%} | "
+            "{support_weighted_relative_l1_error:.2%} | "
+            "{median_effective_leaf_support:.1f} | "
             "{max_completeness_error:.3g} | "
             "{mean_missed_event_fraction:.1%} | {zero_path_fraction:.1%} | "
             "{milliseconds_per_path:.1f} |".format(**row)

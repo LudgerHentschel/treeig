@@ -91,10 +91,11 @@ def main() -> None:
     configurations = ((128, 0), (128, 4), (1024, 0), (1024, 4))
 
     print(
-        "| model | grid | refine | max relative L1 error | "
+        "| model | grid | refine | median relative L1 error | "
+        "95th pct relative L1 error | "
         "max completeness error | ms/path |"
     )
-    print("|---|---|---|---|---|---|")
+    print("|---|---|---|---|---|---|---|")
     for name, model, baselines, observations, targets in _models(args.seed):
         references = [
             _attribute(
@@ -144,7 +145,9 @@ def main() -> None:
                 )
             print(
                 f"| {name} | {grid} | {refine} | "
-                f"{max(relative_errors):.2%} | {max(completeness):.3g} | "
+                f"{np.median(relative_errors):.2%} | "
+                f"{np.percentile(relative_errors, 95):.2%} | "
+                f"{max(completeness):.3g} | "
                 f"{1000.0 * elapsed / len(observations):.1f} |"
             )
 
