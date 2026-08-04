@@ -206,6 +206,14 @@ TreeIG. Because it locates crossings numerically, multiple nearby crossings may
 occasionally be merged into a single event; exact TreeIG avoids this by
 enumerating crossings directly from the tree structure.
 
+The default `grid_size=1024` is a practical starting point, not an accuracy
+guarantee. Completeness can remain exact when nearby events are merged because
+the merged jumps still telescope. For allocation-sensitive work, rerun a
+representative subset at a larger grid such as 4,096 or 8,192 and compare the
+feature attributions themselves. The reproducible
+[probability-forest stress benchmark](benchmarks/README.md) performs this
+resolution check against an independent structural crossing oracle.
+
 Two caveats on coverage:
 
 - **CatBoost and other encoded models.** TreeIGNumeric removes the *parsing*
