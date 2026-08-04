@@ -137,6 +137,123 @@ def test_public_numeric_model_output_validates_inputs():
         explainer.model_output([[np.nan, 0.0]])
 
 
+def _floored_scores(model, X, floor):
+    proba = np.maximum(model.predict_proba(X), floor)
+    proba = proba / proba.sum(axis=1, keepdims=True)
+    return np.log(proba)
+
+
+def test_binary_probability_classifier_can_explain_log_odds():
+    from sklearn.ensemble import RandomForestClassifier
+
+    X = np.array(
+        [[0.0, 0.0], [0.2, 1.0], [0.8, 0.0], [1.0, 1.0], [0.5, 0.4]]
+    )
+    y = np.array([0, 0, 1, 1, 1])
+    model = RandomForestClassifier(
+        n_estimators=7, max_depth=2, random_state=0
+    ).fit(X, y)
+    floor = 1e-6
+
+    with pytest.warns(RuntimeWarning, match="deriving a score"):
+        explainer = TreeIGNumeric(
+            model,
+            baseline=X[0],
+            probability_to_score=True,
+            probability_floor=floor,
+            grid_size=128,
+        )
+    explained = X[2:]
+    log_proba = _floored_scores(model, explained, floor)
+    expected = log_proba[:, 1] - log_proba[:, 0]
+    base_log_proba = _floored_scores(model, X[[0]], floor)
+    expected_base = base_log_proba[0, 1] - base_log_proba[0, 0]
+
+    np.testing.assert_allclose(explainer.model_output(explained), expected)
+    np.testing.assert_allclose(
+        explainer.attribute(explained).sum(axis=1) + expected_base,
+        expected,
+        atol=1e-12,
+    )
+
+
+def test_multiclass_probability_classifier_uses_centered_log_scores():
+    from sklearn.datasets import make_classification
+    from sklearn.ensemble import ExtraTreesClassifier
+
+    X, y = make_classification(
+        n_samples=70,
+        n_features=4,
+        n_informative=4,
+        n_redundant=0,
+        n_classes=3,
+        random_state=2,
+    )
+    model = ExtraTreesClassifier(
+        n_estimators=9, max_depth=3, random_state=2
+    ).fit(X, y)
+    floor = 1e-5
+
+    with pytest.warns(RuntimeWarning, match="deriving a score"):
+        explainer = TreeIGNumeric(
+            model,
+            baseline=X[0],
+            target=2,
+            probability_to_score=True,
+            probability_floor=floor,
+            grid_size=256,
+        )
+    log_proba = _floored_scores(model, X[10:14], floor)
+    expected = log_proba[:, 2] - log_proba.mean(axis=1)
+
+    np.testing.assert_allclose(explainer.model_output(X[10:14]), expected)
+    np.testing.assert_allclose(
+        explainer.attribute(X[10:14]).sum(axis=1)
+        + explainer.model_output(X[[0]])[0],
+        expected,
+        atol=1e-12,
+    )
+
+
+def test_probability_score_requires_explicit_floor_at_zero():
+    from sklearn.tree import DecisionTreeClassifier
+
+    X = np.array([[0.0], [1.0]])
+    model = DecisionTreeClassifier(random_state=0).fit(X, [0, 1])
+    with pytest.warns(RuntimeWarning, match="deriving a score"):
+        explainer = TreeIGNumeric(
+            model,
+            baseline=X[0],
+            probability_to_score=True,
+        )
+
+    with pytest.raises(ValueError, match="probability_floor"):
+        explainer.model_output(X)
+
+
+@pytest.mark.parametrize("floor", [0.0, 1.0, -0.1, np.inf])
+def test_probability_floor_is_validated(floor):
+    class StepRegressor:
+        def predict(self, X):
+            return np.zeros(X.shape[0])
+
+    with pytest.raises(ValueError, match="probability_floor"):
+        TreeIGNumeric(
+            StepRegressor(), baseline=np.zeros(1), probability_floor=floor
+        )
+
+
+def test_probability_floor_requires_score_transformation():
+    class StepRegressor:
+        def predict(self, X):
+            return np.zeros(X.shape[0])
+
+    with pytest.raises(ValueError, match="probability_to_score=True"):
+        TreeIGNumeric(
+            StepRegressor(), baseline=np.zeros(1), probability_floor=1e-6
+        )
+
+
 if __name__ == "__main__":
     test_single_split()
     test_additive_two_features()

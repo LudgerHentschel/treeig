@@ -521,21 +521,16 @@ def _warn_if_sklearn_treeig_supported(model) -> None:
     """Warn when a scikit-learn tree model has exact TreeIG support."""
     try:
         from sklearn.ensemble import (
-            ExtraTreesClassifier,
             ExtraTreesRegressor,
             GradientBoostingClassifier,
             GradientBoostingRegressor,
-            RandomForestClassifier,
             RandomForestRegressor,
         )
-        from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+        from sklearn.tree import DecisionTreeRegressor
 
         supported_types = (
-            DecisionTreeClassifier,
             DecisionTreeRegressor,
-            RandomForestClassifier,
             RandomForestRegressor,
-            ExtraTreesClassifier,
             ExtraTreesRegressor,
             GradientBoostingClassifier,
             GradientBoostingRegressor,
@@ -578,7 +573,68 @@ def _select_proba(proba: ArrayF, target) -> ArrayF:
     return proba[:, int(target)]
 
 
-def make_scalar_fn(model, target=None) -> ScalarFn:
+def _select_probability_score(
+    proba: ArrayF,
+    target,
+    probability_floor=None,
+) -> ArrayF:
+    """Convert probabilities to a binary margin or centered log score."""
+
+    proba = np.asarray(proba, dtype=float)
+    if proba.ndim == 1:
+        proba = np.column_stack((1.0 - proba, proba))
+    if proba.ndim != 2 or proba.shape[1] < 2:
+        raise ValueError(
+            "class probabilities must have shape (n_observations, n_classes)"
+        )
+    if (
+        not np.isfinite(proba).all()
+        or np.any(proba < 0.0)
+        or np.any(proba > 1.0)
+    ):
+        raise ValueError("class probabilities must be finite and in [0, 1]")
+    row_sums = proba.sum(axis=1, keepdims=True)
+    if np.any(row_sums <= 0.0):
+        raise ValueError("class probabilities must have a positive row sum")
+    proba = proba / row_sums
+
+    if probability_floor is None:
+        if np.any(proba <= 0.0):
+            raise ValueError(
+                "probability-derived scores are infinite when a class "
+                "probability is zero; set probability_floor explicitly"
+            )
+    else:
+        floor = float(probability_floor)
+        if not np.isfinite(floor) or not 0.0 < floor < 1.0:
+            raise ValueError("probability_floor must be strictly between 0 and 1")
+        proba = np.maximum(proba, floor)
+        proba = proba / proba.sum(axis=1, keepdims=True)
+
+    log_proba = np.log(proba)
+    n_classes = proba.shape[1]
+    if n_classes == 2:
+        if target in (None, 1):
+            return log_proba[:, 1] - log_proba[:, 0]
+        if target == 0:
+            return log_proba[:, 0] - log_proba[:, 1]
+        raise ValueError(f"target={target!r} invalid for binary probabilities")
+
+    if target is None:
+        raise ValueError("multiclass probability scores require a target index")
+    target = int(target)
+    if target < 0 or target >= n_classes:
+        raise ValueError(f"target={target!r} invalid for {n_classes} classes")
+    return log_proba[:, target] - log_proba.mean(axis=1)
+
+
+def make_scalar_fn(
+    model,
+    target=None,
+    *,
+    probability_to_score: bool = False,
+    probability_floor=None,
+) -> ScalarFn:
     """Construct a vectorized scalar-output function for attribution.
 
     ``TreeIGNumeric`` operates on scalar functions of the form
@@ -613,7 +669,7 @@ def make_scalar_fn(model, target=None) -> ScalarFn:
       ``predict(..., prediction_type="RawFormulaVal")``
     * Scikit-learn classifiers exposing ``decision_function``
     * XGBoost and LightGBM scikit-learn wrappers
-    * Classifiers exposing only ``predict_proba`` (fallback)
+    * Classifiers exposing only ``predict_proba`` (probability or derived score)
     * Regressors exposing ``predict``
 
     Parameters
@@ -626,6 +682,12 @@ def make_scalar_fn(model, target=None) -> ScalarFn:
         For binary classifiers, ``None`` selects the positive-class margin
         when available. For multiclass classifiers, an explicit target index
         is required whenever the model returns one score per class.
+    probability_to_score : bool, default=False
+        When no native margin exists, explain binary log odds or centered
+        multiclass log probabilities rather than a class probability.
+    probability_floor : float or None, default=None
+        Explicit lower bound applied before taking logarithms. If omitted,
+        encountering a zero probability raises an actionable error.
 
     Returns
     -------
@@ -764,6 +826,23 @@ def make_scalar_fn(model, target=None) -> ScalarFn:
             return f
 
         if hasattr(model, "predict_proba"):
+            if probability_to_score:
+                warnings.warn(
+                    "No native decision score is available; deriving a score "
+                    "from class probabilities.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+
+                def f(P):
+                    return _select_probability_score(
+                        model.predict_proba(np.asarray(P, dtype=float)),
+                        target,
+                        probability_floor,
+                    )
+
+                return f
+
             warnings.warn(
                 "No additive margin available; explaining a class probability. "
                 "Completeness holds in probability space "
@@ -835,6 +914,12 @@ class TreeIGNumeric:
         Target output for classification models. Binary classifiers default to
         the positive-class margin or probability where possible. Multiclass
         outputs require an explicit target.
+    probability_to_score : bool, default=False
+        For classifiers without native margins, transform probabilities to
+        binary log odds or centered multiclass log scores.
+    probability_floor : float or None, default=None
+        Explicit lower bound used before the logarithm. Without a floor, zero
+        probabilities raise rather than being clipped silently.
     **engine_kwargs
         Optional controls passed to :class:`NumericEngine`, such as
         ``grid_size``, ``max_refine``, ``t_min``, ``tol``, and
@@ -848,11 +933,39 @@ class TreeIGNumeric:
     the path.
     """
 
-    def __init__(self, model, baseline, target=None, **engine_kwargs) -> None:
+    def __init__(
+        self,
+        model,
+        baseline,
+        target=None,
+        *,
+        probability_to_score: bool = False,
+        probability_floor=None,
+        **engine_kwargs,
+    ) -> None:
+        if not isinstance(probability_to_score, bool):
+            raise TypeError("probability_to_score must be a boolean")
+        if probability_floor is not None:
+            floor = float(probability_floor)
+            if not np.isfinite(floor) or not 0.0 < floor < 1.0:
+                raise ValueError(
+                    "probability_floor must be strictly between 0 and 1"
+                )
+            if not probability_to_score:
+                raise ValueError(
+                    "probability_floor requires probability_to_score=True"
+                )
         self.model = model
         self.baseline = np.asarray(baseline, dtype=float).ravel()
         self.target = target
-        self._f = make_scalar_fn(model, target)
+        self.probability_to_score = probability_to_score
+        self.probability_floor = probability_floor
+        self._f = make_scalar_fn(
+            model,
+            target,
+            probability_to_score=probability_to_score,
+            probability_floor=probability_floor,
+        )
         self._engine = NumericEngine(
             self._f,
             n_features=self.baseline.size,

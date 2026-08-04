@@ -8,7 +8,10 @@ For each observation, TreeIG returns feature attributions $\phi_j$ satisfying
 
 $$\sum_j \phi_j = F(x) - F(x_0),$$
 
-where $F$ is the scalar model output being explained. For regression models, $F$ is the prediction. For supported classifiers, $F$ is the raw margin/logit, not the predicted probability.
+where $F$ is the scalar model output being explained. For regression models,
+$F$ is the prediction. Exact classification backends use native raw margins.
+TreeIGNumeric can additionally transform probability-only classifiers to
+binary log odds or centered multiclass log scores.
 
 Integrated Gradients (Sundararajan, Taly, and Yan, 2017) defines feature attributions by integrating model gradients along a straight-line path from a baseline $x_0$ to the observation $x$.
 
@@ -163,8 +166,8 @@ TreeIG currently supports tree models with finite numeric feature inputs.
 - `xgboost.XGBClassifier`
 - `lightgbm.LGBMClassifier`
 
-For classification models, TreeIG attributes raw margins or logits. It does not
-attribute predicted probabilities because these are not additive across trees.
+For classification models, exact structural TreeIG attributes raw margins or
+logits. Its current exact engine does not transform ensemble probabilities.
 
 TreeIG computes exact path decompositions directly from the fitted tree
 structure. Since tree representations differ substantially across
@@ -178,7 +181,7 @@ The exact TreeIG parser does not currently support:
 - CatBoost;
 - categorical splits;
 - missing-value routing (use feature augmentation for missingness);
-- probability-output attribution (because probability attribution is not additive);
+- structurally exact transformed-probability attribution;
 - probability-averaging or vote-share classifiers such as
   `DecisionTreeClassifier`, `RandomForestClassifier`, and
   `ExtraTreesClassifier` (because they produce probabilities, not scores).
@@ -210,10 +213,11 @@ Two caveats on coverage:
   feature along the straight-line path is not meaningful, which is a property of
   Integrated Gradients itself, not of the implementation. TreeIGNumeric works on
   CatBoost (and similar) models with numeric or one-hot-encoded inputs.
-- **Probability-averaging classifiers.** For models without an additive score
-  (e.g. `RandomForestClassifier`), TreeIGNumeric explains a class *probability*,
-  so completeness holds in probability space:
-  $\sum_j \phi_j = p(x) - p(x_0)$.
+- **Probability-averaging classifiers.** By default, TreeIGNumeric retains its
+  original behavior and explains one class probability. With
+  `probability_to_score=True`, it instead explains binary log odds or a
+  centered multiclass log score. Zero probabilities require an explicit
+  `probability_floor`; TreeIGNumeric never clips them silently.
 
 ```python
 import treeig as tig
@@ -224,6 +228,26 @@ output = ig.model_output(X_eval)
 
 print(summary["mean_abs_residual"])
 ```
+
+For a probability-only classifier:
+
+```python
+ig = tig.TreeIGNumeric(
+    model,
+    baseline=x0,
+    target=2,                    # omit for binary positive-class log odds
+    probability_to_score=True,
+    probability_floor=1e-6,     # explicit because tree probabilities may be 0
+)
+phi = ig.attribute(X_eval)
+score = ig.model_output(X_eval)
+```
+
+For binary probabilities, the explained score is
+`log(p1) - log(p0)`. For `K` classes, target `k` selects
+`log(p_k) - mean(log(p))`. Pairwise differences are therefore invariant log
+odds. The floor is applied to every class probability and the probabilities
+are renormalized before taking logarithms.
 
 ## Diagnostics
 
@@ -275,9 +299,8 @@ ig = tig.TreeIG(model, baseline=x0, target=2)
 phi_class_2 = ig.attribute(X_eval)
 ```
 
-TreeIG attributes raw class margins. If probability-space explanations are
-needed, users should transform or interpret the margin-level contributions
-separately.
+Exact TreeIG attributes raw class margins. TreeIGNumeric can use the explicit
+probability-derived score convention above when no native margin exists.
 
 ## Functional interface
 
