@@ -57,6 +57,8 @@ jobs:
     environment: pypi
     permissions:
       id-token: write
+      contents: write
+
     steps:
       - name: Download distributions
         uses: actions/download-artifact@v8
@@ -66,3 +68,14 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Create GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --generate-notes \
+            --title "$GITHUB_REF_NAME" \
+            --latest
