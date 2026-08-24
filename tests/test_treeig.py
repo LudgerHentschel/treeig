@@ -101,13 +101,14 @@ def test_public_support_detection_and_model_output():
 
 def assert_completeness(model, X, x0, target=None, atol=1e-8, rtol=1e-8):
     ig = TreeIG(model, baseline=x0, target=target).warmup(X[:3])
-    phi, infos, summary = ig.explain(X, target=target)
+    result = ig.explain(X, target=target)
+    phi = result.values
 
     assert phi.shape == X.shape
     assert np.isfinite(phi).all()
 
-    residuals = np.array([d["residual"] for d in infos], dtype=float)
-    endpoint_delta = np.array([d["endpoint_delta"] for d in infos], dtype=float)
+    residuals = result.completeness_error
+    endpoint_delta = ig.model_output(X, target=target) - result.base_values
 
     np.testing.assert_allclose(
         phi.sum(axis=1),
@@ -117,13 +118,13 @@ def assert_completeness(model, X, x0, target=None, atol=1e-8, rtol=1e-8):
     )
     scale = max(1.0, float(np.max(np.abs(endpoint_delta))))
     assert np.max(np.abs(residuals)) <= atol + rtol * scale
-    assert summary["max_abs_residual"] <= atol + rtol * scale
+    assert result.max_abs_completeness_error <= atol + rtol * scale
 
 
 def assert_attribute_matches_explain(model, X, x0, target=None, atol=1e-12):
     ig = TreeIG(model, baseline=x0, target=target).warmup(X[:3])
     phi_attr = ig.attribute(X, target=target)
-    phi_explain, _, _ = ig.explain(X, target=target)
+    phi_explain = ig.explain(X, target=target).values
 
     np.testing.assert_allclose(phi_attr, phi_explain, atol=atol, rtol=0.0)
 
@@ -536,10 +537,10 @@ def test_one_node_tree_has_zero_attributions():
     X_eval = X[:20]
 
     ig = TreeIG(model, baseline=x0)
-    phi, infos, summary = ig.explain(X_eval)
+    result = ig.explain(X_eval)
 
-    np.testing.assert_allclose(phi, 0.0, atol=0.0, rtol=0.0)
-    assert summary["max_abs_residual"] == 0.0
+    np.testing.assert_allclose(result.values, 0.0, atol=0.0, rtol=0.0)
+    assert result.max_abs_completeness_error == 0.0
 
 
 def test_zero_movement_observation_has_zero_attributions():
@@ -554,10 +555,10 @@ def test_zero_movement_observation_has_zero_attributions():
     X_eval = x0.reshape(1, -1)
 
     ig = TreeIG(model, baseline=x0)
-    phi, infos, summary = ig.explain(X_eval)
+    result = ig.explain(X_eval)
 
-    np.testing.assert_allclose(phi, 0.0, atol=1e-12, rtol=0.0)
-    assert summary["max_abs_residual"] <= 1e-12
+    np.testing.assert_allclose(result.values, 0.0, atol=1e-12, rtol=0.0)
+    assert result.max_abs_completeness_error <= 1e-12
 
 
 def test_threshold_at_baseline_or_endpoint_completeness():
@@ -632,12 +633,12 @@ def test_sklearn_gradient_boosting_classifier_subclass_uses_decision_function():
     model.fit(X, y)
 
     ig = TreeIG(model, baseline=x0, target=1).warmup(X_eval[:3])
-    phi, infos, _ = ig.explain(X_eval, target=1)
-    endpoint_delta = np.array([d["endpoint_delta"] for d in infos], dtype=float)
+    result = ig.explain(X_eval, target=1)
+    endpoint_delta = ig.model_output(X_eval, target=1) - result.base_values
 
     expected = model.decision_function(X_eval) - model.decision_function(x0.reshape(1, -1))[0]
     np.testing.assert_allclose(endpoint_delta, expected, atol=2e-8, rtol=2e-8)
-    np.testing.assert_allclose(phi.sum(axis=1), expected, atol=2e-8, rtol=2e-8)
+    np.testing.assert_allclose(result.values.sum(axis=1), expected, atol=2e-8, rtol=2e-8)
 
 
 def test_backend_round_input_flags_are_backend_specific():
@@ -678,10 +679,16 @@ def test_batch_size_matches_full_batch():
     ).fit(X, y)
 
     ig = TreeIG(model, baseline=x0).warmup(X_eval[:3])
-    phi_full, infos_full, summary_full = ig.explain(X_eval)
-    phi_chunk, infos_chunk, summary_chunk = ig.explain(X_eval, batch_size=7)
+    result_full = ig.explain(X_eval)
+    result_chunk = ig.explain(X_eval, batch_size=7)
 
-    np.testing.assert_allclose(phi_chunk, phi_full, atol=0.0, rtol=0.0)
+    np.testing.assert_allclose(result_chunk.values, result_full.values, atol=0.0, rtol=0.0)
+    np.testing.assert_allclose(result_chunk.base_values, result_full.base_values)
+    np.testing.assert_allclose(
+        result_chunk.completeness_error, result_full.completeness_error
+    )
+    infos_full, summary_full = ig.diagnostics(X_eval)
+    infos_chunk, summary_chunk = ig.diagnostics(X_eval, batch_size=7)
     assert [d["n_events"] for d in infos_chunk] == [d["n_events"] for d in infos_full]
     assert summary_chunk == summary_full
 

@@ -10,6 +10,7 @@ from .numeric import (
     TreeIGNumeric,
     compute_numeric,
 )
+from .explanation import Explanation
 from .dispatch import supports_model as supports
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "TreeIGNumeric",
     "compute_numeric",
     "supports",
+    "Explanation",
 ]
 
 try:

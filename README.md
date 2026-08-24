@@ -19,14 +19,14 @@ At first glance, Integrated Gradients appears mismatched with piecewise-constant
 
 Because TreeIG replaces numerical quadrature and sampling with a finite sum over split crossings, it is fast in practice. For many real-world models — hundreds of trees, hundreds of features — attribution over thousands of observations completes in a few milliseconds on a modern laptop. (See the [example notebook](examples/) for timings.) For many typical use cases TreeIG is competitive with, and often faster than, TreeSHAP, which is itself considered fast.
 
-TreeIG also includes [TreeIGNumeric](#treeignumeric), a model-agnostic fallback that recovers the same crossing-sum attribution through numerical event detection when exact structural support is unavailable.
+TreeIG also includes [TreeIGNumeric](#treeignumeric), a model-agnostic fallback that recovers the same kind of crossing-sum attribution through numerical event detection when exact structural support is unavailable.
 
-## Recommended baseline construction
+## Recommended baseline distribution
 
 For Integrated Gradients, the baseline determines the prediction contrast
 being explained. **[CBaseline](https://github.com/lhentschel/cbaseline) is the
-preferred way to construct TreeIG baselines.** It produces empirical,
-prediction-neutral baseline distributions whose weighted mean model output is
+preferred way to construct TreeIG baselines.** CBaseline produces empirical,
+prediction-neutral baseline *distributions* whose weighted mean model output is
 the chosen reference prediction. TreeIG then explains the model prediction
 relative to that reference level rather than relative to an arbitrary feature
 vector such as the feature-wise mean.
@@ -58,7 +58,8 @@ x0 = X_train.mean(axis=0)
 X_eval = X_test[:100]
 
 ig = tig.TreeIG(model, baseline=x0)
-phi = ig.attribute(X_eval)
+result = ig.explain(X_eval)
+phi = result.values
 ```
 
 For libraries integrating TreeIG, the public adapter surface also includes:
@@ -66,6 +67,7 @@ For libraries integrating TreeIG, the public adapter surface also includes:
 ```python
 tig.supports(model)                       # exact backend availability
 ig.model_output(X_eval)                   # scalar output being attributed
+result.to_shap()                          # optional SHAP plotting adapter
 
 numeric = tig.TreeIGNumeric(model, baseline=x0)
 numeric.model_output(X_eval)              # numeric backend output scale
@@ -234,10 +236,11 @@ Two caveats on coverage:
 import treeig as tig
 
 ig = tig.TreeIGNumeric(model, baseline=x0)
-phi, infos, summary = ig.explain(X_eval)
+result = ig.explain(X_eval)
+infos, summary = ig.diagnostics(X_eval)
 output = ig.model_output(X_eval)
 
-print(summary["mean_abs_residual"])
+print(result.max_abs_completeness_error)
 ```
 
 For a probability-only classifier:
@@ -266,19 +269,46 @@ do not reconstruct an unavailable training-time margin. TreeIGNumeric treats
 the derived score itself as the explicitly defined scalar model output and
 attributes its jumps after the ensemble probabilities have been aggregated.
 
-## Diagnostics
+## Explanation objects and SHAP plots
 
-Use `explain` when you want attributions together with completeness
-diagnostics.
+Like UnifiedIG, direct TreeIG returns a plotting-library-independent
+`Explanation` containing parallel attribution arrays and completeness
+diagnostics:
 
 ```python
 ig = tig.TreeIG(model, baseline=x0)
-phi, infos, summary = ig.explain(X_eval)
+result = ig.explain(X_eval)
 
-print(summary)
+result.values
+result.base_values
+result.data
+result.feature_names
+result.output_names
+result.max_abs_completeness_error
 ```
 
-Each entry in `infos` contains diagnostics for one observation:
+Convert it when you want to use SHAP's plotting ecosystem:
+
+```python
+import shap
+
+shap_values = result.to_shap()
+shap.plots.beeswarm(shap_values)
+shap.plots.waterfall(shap_values[0])
+shap.plots.bar(shap_values)
+```
+
+SHAP is an optional plotting dependency; install it with
+`pip install treeig[shap]`. The conversion changes only the container, not the
+TreeIG attribution semantics.
+
+For detailed split-crossing statistics, call `diagnostics`:
+
+```python
+infos, summary = ig.diagnostics(X_eval)
+```
+
+Each entry in `infos` describes one observation:
 
 ```python
 {
@@ -325,7 +355,7 @@ probability-derived score convention above when no native margin exists.
 TreeIG also provides a direct functional interface.
 
 ```python
-phi, infos, summary = tig.compute(
+result = tig.compute(
     model,
     baseline=x0,
     X=X_eval,
@@ -418,6 +448,61 @@ becomes more nonlinear or the baseline $x_0$ diverges from the background
 distribution, the two increasingly disagree — reflecting genuine differences in
 the questions they answer rather than errors in either method.
 
+### Small runtime comparison
+
+TreeSHAP is widely recognized to be fast, even for complex trees and large data
+sets. TreeIG can match or exceed that speed because it solves a smaller
+computational problem: it sums the prediction changes at the boundaries crossed
+by one path.
+
+The following deliberately narrow benchmark uses two standard scikit-learn
+regressors: a 200-tree depth-3 gradient-boosting ensemble and a 200-tree
+depth-12 extremely randomized trees (ExtraTrees) ensemble. Both explainers use
+the same single median training row as their reference and attribute raw model
+output. TreeSHAP is
+`shap.TreeExplainer(..., feature_perturbation="interventional")`, which is exact
+for this configuration. The common reference predictions agreed within
+$7.2\times10^{-15}$, and both methods reconstructed predictions within
+$1.3\times10^{-5}$.
+
+| Model | Rows explained | TreeIG | Exact TreeSHAP | TreeIG speedup |
+|---|---:|---:|---:|---:|
+| scikit-learn gradient boosting | 100 | 0.69 ms | 0.86 ms | 1.2x |
+| scikit-learn gradient boosting | 1,000 | 4.53 ms | 8.84 ms | 1.9x |
+| Extremely randomized trees (ExtraTrees) | 100 | 3.11 ms | 29.30 ms | 9.4x |
+| Extremely randomized trees (ExtraTrees) | 1,000 | 25.36 ms | 273.41 ms | 10.8x |
+
+These are medians of seven warmed attribution calls; model fitting, explainer
+construction, TreeIG's Numba compilation, and validation are outside the timed
+region. Results were measured on an Apple M5 (10 cores) with Python 3.13.11,
+TreeIG 0.1.11, scikit-learn 1.9.0, and SHAP 0.52.0, using each library's default
+runtime threading. The seeded 20-feature data, both model definitions, checks,
+and timing code are in
+[`benchmarks/treeig_vs_treeshap.py`](benchmarks/treeig_vs_treeshap.py); rerun
+with `python -m benchmarks.treeig_vs_treeshap`.
+
+[XGBoost](https://xgboost.readthedocs.io/en/stable/prediction.html) and
+[LightGBM](https://lightgbm.readthedocs.io/en/stable/pythonapi/lightgbm.LGBMRegressor.html)
+also provide tightly integrated native TreeSHAP routines. These can bring
+TreeSHAP much closer to TreeIG's runtime; in a companion check, native XGBoost
+TreeSHAP and TreeIG were essentially tied for 100 rows when the XGBoost
+`DMatrix` was prepared before timing. That is a useful operational comparison,
+but not quite like-for-like. Native `tree_path_dependent` TreeSHAP normally uses
+training-sample counts stored along the tree paths as an implicit background
+distribution, while the interventional TreeSHAP timings above use the same
+explicit reference row as TreeIG. More generally, interventional TreeSHAP's
+runtime scales with its explicit background sample, while TreeIG traverses and
+averages the paths from its supplied baseline distribution.
+
+This is a runtime comparison, not an equivalence claim: sharing a reference
+aligns the output scale and reference prediction, but TreeIG and TreeSHAP still
+compute the different quantities described above. Nor does the table claim that
+TreeIG is always faster: TreeSHAP can have lower overhead for very small models
+or batches. The point is that TreeIG remains competitive—and can be materially
+faster—on the larger, slower attribution workloads where runtime matters most.
+Exact timings depend on model shape, batch size, hardware, versions, and thread
+settings.
+
 ## Examples
 
 ### XGBoost regression
@@ -440,10 +525,10 @@ x0 = X_train.mean(axis=0)
 X_eval = X_test[:100]
 
 ig = tig.TreeIG(model, baseline=x0).warmup(X_eval[:3])
-phi, infos, summary = ig.explain(X_eval)
+result = ig.explain(X_eval)
 
-print(phi.shape)
-print(summary["max_abs_residual"])
+print(result.values.shape)
+print(result.max_abs_completeness_error)
 ```
 
 ### Multiclass classification margins
@@ -469,9 +554,9 @@ phi = ig.attribute(X_eval)
 import treeig as tig
 
 ig = tig.TreeIGNumeric(model, baseline=x0)
-phi, infos, summary = ig.explain(X_eval)
+result = ig.explain(X_eval)
 
-print(summary["mean_abs_residual"])
+print(result.max_abs_completeness_error)
 ```
 
 ## Project status

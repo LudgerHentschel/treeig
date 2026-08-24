@@ -66,6 +66,7 @@ from .core import (
     _loss_reduction_weighted_multiclass_trees,
 )
 from .dispatch import extract_tree_arrays, model_predict
+from .explanation import Explanation
 from .utils import _as_float32_float64, _as_target_key, _check_finite_numeric
 
 
@@ -508,6 +509,91 @@ class TreeIG:
         )
 
     def explain(
+        self,
+        X: np.ndarray,
+        baseline: Optional[np.ndarray] = None,
+        baseline_weights: Optional[np.ndarray] = None,
+        target: Optional[int] = None,
+        batch_size: Optional[int] = None,
+        baseline_batch_size: Optional[int] = None,
+    ) -> Explanation:
+        """Return a plotting-compatible feature-attribution explanation.
+
+        The returned :class:`Explanation` follows the same contract as
+        ``unifiedig.Explanation``. It contains attribution values, repeated
+        baseline outputs, evaluation data, names when available, and signed
+        completeness errors. Call :meth:`Explanation.to_shap` to use SHAP's
+        plotting functions without changing the attribution semantics.
+
+        Use :meth:`attribute` for the fastest array-only path and
+        :meth:`diagnostics` for split-event and aggregate diagnostic details.
+        """
+        feature_names = getattr(X, "columns", None)
+        if feature_names is not None:
+            feature_names = [str(name) for name in feature_names]
+        explanation_data = np.asarray(X, dtype=np.float64)
+        arrays = self._resolve_arrays_for_target(target)
+        baselines, weights = self._resolve_baselines(
+            baseline, baseline_weights, arrays
+        )
+        X_prep = self._prepare_X(X, arrays)
+        values = self.attribute(
+            X_prep,
+            baseline=baselines,
+            baseline_weights=weights,
+            target=target,
+            batch_size=batch_size,
+            baseline_batch_size=baseline_batch_size,
+        )
+        output_values = self.model_output(X_prep, target=target)
+        baseline_outputs = self.model_output(baselines, target=target)
+        mean_base_value = float(weights @ baseline_outputs)
+        base_values = np.full(X_prep.shape[0], mean_base_value)
+        completeness_error = output_values - (
+            base_values + values.sum(axis=1)
+        )
+
+        output_names = None
+        classes = getattr(self.model, "classes_", None)
+        if classes is not None:
+            resolved_target = arrays.get("target", None)
+            if len(classes) == 2:
+                class_index = 1 if resolved_target in (None, 1) else 0
+            else:
+                class_index = int(resolved_target)
+            output_names = [str(classes[class_index])]
+
+        return Explanation(
+            values=values,
+            base_values=base_values,
+            data=explanation_data,
+            feature_names=feature_names,
+            output_names=output_names,
+            completeness_error=completeness_error,
+        )
+
+    def diagnostics(
+        self,
+        X: np.ndarray,
+        baseline: Optional[np.ndarray] = None,
+        baseline_weights: Optional[np.ndarray] = None,
+        target: Optional[int] = None,
+        batch_size: Optional[int] = None,
+        baseline_batch_size: Optional[int] = None,
+    ):
+        """Return per-row split-event details and their aggregate summary."""
+
+        _, infos, summary = self._explain_with_diagnostics(
+            X,
+            baseline=baseline,
+            baseline_weights=baseline_weights,
+            target=target,
+            batch_size=batch_size,
+            baseline_batch_size=baseline_batch_size,
+        )
+        return infos, summary
+
+    def _explain_with_diagnostics(
         self,
         X: np.ndarray,
         baseline: Optional[np.ndarray] = None,
@@ -1124,7 +1210,7 @@ def compute(
     batch_size: Optional[int] = None,
 ):
     """
-    Convenience function for computing TreeIG attributions with diagnostics.
+    Convenience function returning a TreeIG explanation object.
 
     This is a functional wrapper around ``TreeIG(...).explain(...)``. It
     constructs a temporary ``TreeIG`` object and returns the output of
@@ -1156,20 +1242,16 @@ def compute(
 
     Returns
     -------
-    attributions : ndarray of shape (n_samples, n_features)
-        Exact integrated-gradient feature attributions.
-
-    infos : list of dict
-        Per-observation additivity diagnostics.
-
-    summary : dict
-        Aggregate additivity and event-count diagnostics.
+    explanation : Explanation
+        Plotting-independent explanation containing attribution values,
+        baseline outputs, evaluation data, names, and completeness errors.
 
     See Also
     --------
     TreeIG : Object-oriented interface.
     TreeIG.attribute : Fast attribution method without diagnostics.
-    TreeIG.explain : Attribution method with diagnostics.
+    TreeIG.explain : Plotting-compatible explanation method.
+    TreeIG.diagnostics : Split-event and aggregate diagnostic details.
     """
     return TreeIG(
         model,
@@ -1225,8 +1307,8 @@ def warmup_exact_gb_ig(
     """
     Backward-compatible warmup alias.
 
-    Returns the same object shape as the old helper: phis, infos, summary for
-    up to the first two observations. boundary_tol is ignored.
+    Returns an :class:`Explanation` for up to the first two observations.
+    ``boundary_tol`` is ignored.
     """
     warnings.warn(
         "warmup_exact_gb_ig is deprecated; use TreeIG(...).warmup(...).",

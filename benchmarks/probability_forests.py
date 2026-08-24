@@ -259,7 +259,11 @@ def _numeric(
                 max_refine=max_refine,
                 warn_residual=False,
             )
-        phi, target_infos, _ = explainer.explain(data[None, :])
+        # This diagnostic stress benchmark needs the engine metadata and times
+        # one attribution pass, rather than the higher-level plotting object.
+        phi, target_infos = explainer._engine.attribute(
+            explainer.baseline, data[None, :]
+        )
         values.append(phi[0])
         infos.append(target_infos[0])
     elapsed = time.perf_counter() - start

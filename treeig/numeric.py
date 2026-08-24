@@ -45,6 +45,8 @@ from typing import Callable, Dict, List, Tuple
 
 import numpy as np
 
+from .explanation import Explanation
+
 ArrayF = np.ndarray
 ScalarFn = Callable[[ArrayF], ArrayF]  # (m, p) -> (m,)
 
@@ -1090,9 +1092,42 @@ class TreeIGNumeric:
             raise ValueError("model output must contain only finite values")
         return output
 
-    def explain(self, X):
-        phi, infos = self._engine.attribute(self.baseline, X)
-        return phi, infos, _summarize(infos)
+    def explain(self, X) -> Explanation:
+        """Return a plotting-compatible feature-attribution explanation."""
+
+        feature_names = getattr(X, "columns", None)
+        if feature_names is not None:
+            feature_names = [str(name) for name in feature_names]
+        data = np.atleast_2d(np.asarray(X, dtype=float))
+        phi, infos = self._engine.attribute(self.baseline, data)
+        output_values = self.model_output(data)
+        mean_base_value = float(self.model_output(self.baseline[None, :])[0])
+        base_values = np.full(data.shape[0], mean_base_value)
+        completeness_error = output_values - (
+            base_values + phi.sum(axis=1)
+        )
+        output_names = None
+        classes = getattr(self.model, "classes_", None)
+        if classes is not None:
+            if len(classes) == 2:
+                class_index = 1 if self.target in (None, 1) else 0
+            else:
+                class_index = int(self.target)
+            output_names = [str(classes[class_index])]
+        return Explanation(
+            values=phi,
+            base_values=base_values,
+            data=data,
+            feature_names=feature_names,
+            output_names=output_names,
+            completeness_error=completeness_error,
+        )
+
+    def diagnostics(self, X):
+        """Return per-row numerical event details and their summary."""
+
+        _, infos = self._engine.attribute(self.baseline, X)
+        return infos, _summarize(infos)
 
     def warmup(self, X=None):
         # No Numba kernels on the numeric path; present for API parity.
