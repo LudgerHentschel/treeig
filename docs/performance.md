@@ -1,5 +1,13 @@
 # Performance and repeated calls
 
+TreeIG is already fast enough for most applications and remains the default.
+When attribution speed matters and an NVIDIA GPU is available, GPUTreeIG can
+be materially faster: the [recorded T4 comparisons](gpu.md#t4-versus-cpu-benchmarks)
+show roughly 9–20× speedups on the workloads reported there. The gain depends
+on the model, batch size, and baseline distribution; small workloads can still
+favor the CPU.
+
+
 TreeIG uses Numba for fast parallel attribution kernels. The first call
 includes JIT compilation. You can compile in advance with `warmup`:
 

@@ -1,6 +1,12 @@
 # GPUTreeIG: optional CUDA execution
 
-`TreeIG` on the CPU is the primary tool and recommended starting point. The
+`TreeIG` on the CPU is already fast enough for most applications and remains
+the default. When attribution speed matters and an NVIDIA GPU is available,
+`GPUTreeIG` can be materially faster: the [T4 comparisons below](#t4-versus-cpu-benchmarks)
+show roughly 9–20× speedups on the reported workloads. The gain depends on the
+problem, and small workloads can still favor the CPU.
+
+The
 `treeig` package also provides `GPUTreeIG`, an optional CUDA implementation for
 large, repeated prediction-attribution workloads with a fixed model and baseline
 distribution. It uses the same attribution semantics as `TreeIG`, up to
@@ -72,19 +78,19 @@ recorded persistent comparison.
 ### Depth-6 random forest
 
 A later run used the current, smaller per-thread scratch buffers. The recorded
-T4 times and CPU-relative speedups for the 100-tree forest were:
+comparisons for the 100-tree forest were:
 
-| Observations (n) | Baselines (B) | T4 (ms) | CPU time / T4 time |
-|---:|---:|---:|---:|
-| 10 | 100 | 3.74 | 11.17× |
-| 100 | 10 | 3.53 | 11.82× |
-| 100 | 100 | 22.63 | 17.02× |
-| 1,000 | 10 | 23.64 | 18.83× |
-| 1,000 | 100 | 207.96 | 19.68× |
+| Observations (n) | Baselines (B) | CPU (ms) | T4 (ms) | CPU time / T4 time |
+|---:|---:|---:|---:|---:|
+| 10 | 100 | ≈41.78 | 3.74 | 11.17× |
+| 100 | 10 | ≈41.72 | 3.53 | 11.82× |
+| 100 | 100 | ≈385.16 | 22.63 | 17.02× |
+| 1,000 | 10 | ≈445.14 | 23.64 | 18.83× |
+| 1,000 | 100 | ≈4,092.65 | 207.96 | 19.68× |
 
-The notes retain GPU latency and CPU-relative speedup for this later run, but
-not its raw CPU timings; the CPU times from the earlier run should not be
-substituted here. Across the scratch-specialization runs, which also included
+CPU times marked ≈ are reconstructed as T4 time × recorded speedup. The
+notes retain these two rounded quantities rather than raw CPU timings for this
+later run, so the reconstructed CPU times are approximate. Across the scratch-specialization runs, which also included
 depth-8 and depth-10 forests, the maximum absolute CPU/GPU difference was
 `2.62e-14`.
 

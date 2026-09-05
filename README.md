@@ -94,8 +94,10 @@ sources also build into searchable HTML with an API reference; see
 
 ## Optional GPU support
 
-`GPUTreeIG` is an optional CUDA backend within this package. CPU `TreeIG` remains
-the default; GPU performance depends on the workload. See
+`TreeIG` is already fast enough for most applications and remains the default.
+When attribution speed matters and an NVIDIA GPU is available, `GPUTreeIG` can
+be materially faster; recorded T4 comparisons show roughly 9–20× speedups on
+the reported workloads. Performance depends on the problem. See
 [GPU documentation](https://ludgerhentschel.github.io/treeig/gpu.html)
 for installation and limitations.
 
