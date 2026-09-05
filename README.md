@@ -12,6 +12,11 @@ TreeIG finds the split boundaries crossed along the straight-line path and sums
 their prediction jumps. For supported models, this avoids numerical integration
 and sampling. Weighted baseline distributions are supported as well.
 
+The method is developed in Ludger Hentschel's
+[**TreeIG: Exact Integrated Gradients for Tree-Based Models**](https://www.ludgerhentschel.com/PDFs/Hentschel%20'26g.pdf).
+It builds on Integrated Gradients introduced by Sundararajan, Taly, and Yan in
+[**Axiomatic Attribution for Deep Networks** (ICML 2017)](https://proceedings.mlr.press/v70/sundararajan17a.html).
+
 ## Why Integrated Gradients works for trees
 
 A tree prediction is constant between splits, so its ordinary gradient is zero
@@ -96,7 +101,8 @@ for installation and limitations.
 
 ## Citation and license
 
-If you use TreeIG in your work, please cite:
+If you use TreeIG in your work, please cite the
+[TreeIG paper](https://www.ludgerhentschel.com/PDFs/Hentschel%20'26g.pdf):
 
 ```bibtex
 @misc{hentschel2026treeig,

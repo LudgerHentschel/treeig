@@ -7,6 +7,11 @@ prediction jumps along paths from a baseline to each observation. The CPU
 Start with a runnable example, then choose the baseline distribution and output
 scale that express the comparison you want to explain.
 
+The method is developed in Ludger Hentschel's
+[**TreeIG: Exact Integrated Gradients for Tree-Based Models**](https://www.ludgerhentschel.com/PDFs/Hentschel%20'26g.pdf).
+It builds on Integrated Gradients introduced by Sundararajan, Taly, and Yan in
+[**Axiomatic Attribution for Deep Networks** (ICML 2017)](https://proceedings.mlr.press/v70/sundararajan17a.html).
+
 ## Why Integrated Gradients works for trees
 
 A tree prediction is constant between splits, so its ordinary gradient is zero

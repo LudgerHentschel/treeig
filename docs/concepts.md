@@ -2,6 +2,12 @@
 
 ## Why TreeIG?
 
+The method is developed in Ludger Hentschel's
+[**TreeIG: Exact Integrated Gradients for Tree-Based Models**](https://www.ludgerhentschel.com/PDFs/Hentschel%20'26g.pdf).
+It builds on Integrated Gradients introduced by Sundararajan, Taly, and Yan in
+[**Axiomatic Attribution for Deep Networks** (ICML 2017)](https://proceedings.mlr.press/v70/sundararajan17a.html).
+
+
 Standard Integrated Gradients defines feature contributions by integrating
 model gradients along a straight-line path from a baseline input to the
 observation. Tree models are piecewise constant, so ordinary gradients are

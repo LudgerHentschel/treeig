@@ -2,7 +2,8 @@
 
 ## Citation
 
-If you use TreeIG in your work, please cite:
+If you use TreeIG in your work, please cite the
+[TreeIG paper](https://www.ludgerhentschel.com/PDFs/Hentschel%20'26g.pdf):
 
 ```bibtex
 @misc{hentschel2026treeig,
@@ -24,8 +25,9 @@ TreeIG:
 Integrated Gradients:
 
 - Sundararajan, Mukund, Ankur Taly, and Qiqi Yan. 2017.
-  "Axiomatic Attribution for Deep Networks."
-  *International Conference on Machine Learning (ICML)*.
+  ["Axiomatic Attribution for Deep Networks."](https://proceedings.mlr.press/v70/sundararajan17a.html)
+  *Proceedings of the 34th International Conference on Machine Learning*,
+  PMLR 70:3319–3328.
 
 SHAP and TreeSHAP:
 
@@ -45,3 +47,19 @@ Popular implementations of Integrated Gradients for smooth models:
 ## License
 
 TreeIG is released under the terms in [LICENSE](https://github.com/LudgerHentschel/treeig/blob/main/LICENSE).
+
+## Integrated Gradients BibTeX
+
+```bibtex
+@inproceedings{sundararajan2017axiomatic,
+  title = {Axiomatic Attribution for Deep Networks},
+  author = {Sundararajan, Mukund and Taly, Ankur and Yan, Qiqi},
+  booktitle = {Proceedings of the 34th International Conference on Machine Learning},
+  series = {Proceedings of Machine Learning Research},
+  volume = {70},
+  pages = {3319--3328},
+  year = {2017},
+  publisher = {PMLR},
+  url = {https://proceedings.mlr.press/v70/sundararajan17a.html},
+}
+```
