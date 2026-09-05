@@ -95,6 +95,7 @@ dev = [
 ]
 
 [project.urls]
+Documentation = "https://ludgerhentschel.github.io/treeig/"
 Homepage = "https://github.com/LudgerHentschel/treeig"
 Repository = "https://github.com/LudgerHentschel/treeig"
 Issues = "https://github.com/LudgerHentschel/treeig/issues"
