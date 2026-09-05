@@ -42,11 +42,65 @@ Observation batching is supported; baseline batching, per-baseline output,
 loss attribution, traces, diagnostics, and `warmup()` are not. Models requiring
 stack or leaf-segment scratch widths above 1,024 entries are rejected.
 
-GPU selection is explicit. Recorded T4 benchmarks show substantial gains for
-some large workloads, but a GPU may be slower for a particular problem. Start
-with `TreeIG` and compare on your own workload if GPU execution is useful.
-The existing validation includes CPU/GPU simulator comparisons and recorded T4
-runs; it is not an exhaustive hardware compatibility study. See the
-[CUDA benchmark notes](https://github.com/LudgerHentschel/treeig/blob/main/benchmarks/README.md#cuda-prediction-attribution)
-for measured workloads, numerical agreement, and limitations.
+## T4 versus CPU benchmarks
 
+The following recorded Google Colab Tesla T4 comparisons illustrate workloads
+where GPU execution helped. They are examples, not a promise of speedup on other
+hardware or problems. CPU `TreeIG` remains the default.
+
+Here `n` is the number of observations and `B` is the number of weighted baseline
+rows. The persistent explainer retains its model and baseline state on the GPU
+and reuses its work buffers. Timings are medians of three warmed calls; model
+fitting, parsing, baseline preparation, and JIT compilation are outside the timed
+region. GPU calls include observation transfers and result retrieval.
+
+### Shallow gradient boosting
+
+The recorded persistent run used a 100-tree, depth-3 boosting ensemble:
+
+| Observations (n) | Baselines (B) | CPU (ms) | T4 (ms) | CPU time / T4 time |
+|---:|---:|---:|---:|---:|
+| 10 | 100 | 26.00 | 2.69 | 9.68× |
+| 100 | 10 | 24.95 | 2.71 | 9.22× |
+| 100 | 100 | 252.24 | 15.22 | 16.58× |
+| 1,000 | 10 | 259.69 | 15.22 | 17.06× |
+| 1,000 | 100 | 2,415.75 | 137.41 | 17.58× |
+
+Maximum absolute CPU/GPU attribution difference was below `2.0e-14` in the
+recorded persistent comparison.
+
+### Depth-6 random forest
+
+A later run used the current, smaller per-thread scratch buffers. The recorded
+T4 times and CPU-relative speedups for the 100-tree forest were:
+
+| Observations (n) | Baselines (B) | T4 (ms) | CPU time / T4 time |
+|---:|---:|---:|---:|
+| 10 | 100 | 3.74 | 11.17× |
+| 100 | 10 | 3.53 | 11.82× |
+| 100 | 100 | 22.63 | 17.02× |
+| 1,000 | 10 | 23.64 | 18.83× |
+| 1,000 | 100 | 207.96 | 19.68× |
+
+The notes retain GPU latency and CPU-relative speedup for this later run, but
+not its raw CPU timings; the CPU times from the earlier run should not be
+substituted here. Across the scratch-specialization runs, which also included
+depth-8 and depth-10 forests, the maximum absolute CPU/GPU difference was
+`2.62e-14`.
+
+Small workloads can favor the CPU because GPU launch and transfer costs dominate.
+Compare warmed calls on your own model and baseline distribution when deciding
+whether to use the optional backend. CUDA simulator checks validate semantics;
+simulator timings are not GPU performance evidence.
+
+The [full CUDA benchmark notes](gpu-benchmarks.md) preserve the earlier stateless
+and persistent measurements and the scratch-buffer comparison. The
+[benchmark script](https://github.com/LudgerHentschel/treeig/blob/main/benchmarks/cuda_prediction.py)
+is available in the repository. These are historical measurements, not new runs
+performed for this documentation update.
+
+```{toctree}
+:hidden:
+
+gpu-benchmarks
+```
