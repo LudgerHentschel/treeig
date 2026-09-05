@@ -50,6 +50,7 @@ concepts
 numeric
 performance
 comparison
+gpu
 ```
 
 ```{toctree}
@@ -59,5 +60,4 @@ comparison
 api
 references
 building
-gpu
 ```
