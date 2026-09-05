@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "treeig"
-version = "0.1.14"
+version = "0.2.0"
 description = "Exact Integrated Gradients for tree ensembles."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -45,6 +45,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+docs = [
+    "sphinx>=7,<9",
+    "myst-parser>=3,<5",
+    "pydata-sphinx-theme>=0.16,<0.17",
+]
+
+cuda = [
+    "numba-cuda",
+]
+
 shap = [
     "shap>=0.42",
 ]
@@ -85,9 +95,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/lhentschel/treeig"
-Repository = "https://github.com/lhentschel/treeig"
-Issues = "https://github.com/lhentschel/treeig/issues"
+Homepage = "https://github.com/LudgerHentschel/treeig"
+Repository = "https://github.com/LudgerHentschel/treeig"
+Issues = "https://github.com/LudgerHentschel/treeig/issues"
 
 [tool.setuptools]
 include-package-data = true

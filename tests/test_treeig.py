@@ -158,6 +158,77 @@ def test_weighted_baselines_match_explicit_average():
     np.testing.assert_allclose(actual.sum(axis=1), endpoint, atol=1e-10)
 
 
+def test_weighted_many_baselines_single_observation_matches_explicit_average():
+    from sklearn.ensemble import GradientBoostingRegressor
+
+    X, y = make_regression_data(n=180, p=5, seed=126)
+    model = GradientBoostingRegressor(
+        n_estimators=20, max_depth=2, random_state=126
+    ).fit(X, y)
+    baselines = X[:100]
+    weights = np.arange(1.0, 101.0)
+    weights /= weights.sum()
+    X_eval = X[150:151]
+    explainer = TreeIG(model)
+
+    actual = explainer.attribute(
+        X_eval, baseline=baselines, baseline_weights=weights
+    )
+    expected = sum(
+        weights[b] * explainer.attribute(X_eval, baseline=baselines[b])
+        for b in range(baselines.shape[0])
+    )
+
+    np.testing.assert_allclose(actual, expected, atol=1e-12, rtol=1e-12)
+    endpoint = model.predict(X_eval)[0] - weights @ model.predict(baselines)
+    np.testing.assert_allclose(actual.sum(), endpoint, atol=1e-10, rtol=1e-10)
+
+
+def test_zero_weight_baselines_do_not_affect_attributions():
+    from sklearn.ensemble import RandomForestRegressor
+
+    X, y = make_regression_data(n=100, p=5, seed=127)
+    model = RandomForestRegressor(
+        n_estimators=8, max_depth=5, random_state=127, n_jobs=1
+    ).fit(X, y)
+    baselines = X[:4]
+    weights = np.array([0.0, 3.0, 0.0, 0.0])
+    X_eval = X[80:83]
+    explainer = TreeIG(model)
+
+    actual = explainer.attribute(
+        X_eval, baseline=baselines, baseline_weights=weights
+    )
+    expected = explainer.attribute(X_eval, baseline=baselines[1])
+
+    np.testing.assert_allclose(actual, expected, atol=0.0, rtol=0.0)
+
+
+def test_weighted_baselines_preserve_endpoint_boundary_ownership():
+    from sklearn.tree import DecisionTreeRegressor
+
+    X = np.array([[0.0], [0.25], [0.75], [1.0]], dtype=float)
+    y = np.array([0.0, 0.0, 2.0, 2.0], dtype=float)
+    model = DecisionTreeRegressor(max_depth=1, random_state=0).fit(X, y)
+    threshold = float(model.tree_.threshold[0])
+    baselines = np.array([[threshold], [0.0], [1.0]])
+    weights = np.array([0.2, 0.3, 0.5])
+    X_eval = np.array([[threshold], [0.0], [1.0]], dtype=float)
+    explainer = TreeIG(model)
+
+    actual = explainer.attribute(
+        X_eval, baseline=baselines, baseline_weights=weights
+    )
+    expected = sum(
+        weights[b] * explainer.attribute(X_eval, baseline=baselines[b])
+        for b in range(baselines.shape[0])
+    )
+
+    np.testing.assert_allclose(actual, expected, atol=0.0, rtol=0.0)
+    endpoint = model.predict(X_eval) - weights @ model.predict(baselines)
+    np.testing.assert_allclose(actual[:, 0], endpoint, atol=1e-12, rtol=0.0)
+
+
 def test_weighted_baseline_loss_matches_explicit_average():
     from sklearn.ensemble import RandomForestRegressor
 

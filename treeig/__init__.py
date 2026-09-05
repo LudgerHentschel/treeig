@@ -12,9 +12,11 @@ from .numeric import (
 )
 from .explanation import Explanation
 from .dispatch import supports_model as supports
+from .gpu import GPUTreeIG
 
 __all__ = [
     "TreeIG",
+    "GPUTreeIG",
     "compute",
     "exact_gb_ig_batch_fast",
     "extract_gb_tree_arrays",
