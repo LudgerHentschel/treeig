@@ -14,7 +14,10 @@ myst_heading_anchors = 3
 exclude_patterns = ["_build"]
 html_theme = "pydata_sphinx_theme"
 html_title = f"TreeIG {release}"
-html_theme_options = {"github_url": "https://github.com/LudgerHentschel/treeig", "show_prev_next": True}
+html_theme_options = {"github_url": "https://github.com/LudgerHentschel/treeig", "show_prev_next": True, "navbar_center": []}
 html_static_path = []
 napoleon_numpy_docstring = True
 napoleon_google_docstring = False
+
+templates_path = ["_templates"]
+html_sidebars = {"**": ["documentation-nav.html"]}

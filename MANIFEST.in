@@ -1,4 +1,4 @@
 include LICENSE CITATION.cff CHANGELOG.md
 recursive-include benchmarks *.md *.py
-recursive-include docs *.svg *.md *.py *.txt
+recursive-include docs *.svg *.md *.py *.txt *.html
 prune docs/_build
