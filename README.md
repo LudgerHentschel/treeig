@@ -1,6 +1,7 @@
 # TreeIG
 
 [![PyPI version](https://img.shields.io/pypi/v/treeig.svg)](https://pypi.org/project/treeig/)
+[![Documentation](https://img.shields.io/badge/docs-user%20guide-blue)](https://ludgerhentschel.github.io/treeig/)
 
 TreeIG computes exact Integrated Gradients for tree-based models. It attributes
 the change in a model's scalar output from a baseline to an observation to the
