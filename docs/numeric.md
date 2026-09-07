@@ -5,7 +5,10 @@ attribution by numerically detecting prediction discontinuities along the
 integration path. It requires no access to model internals — only repeated
 evaluations of the prediction function — so it applies to many
 piecewise-constant models the exact parser does not support. Whenever a
-supported backend is available, exact TreeIG should be preferred.
+supported backend is available, exact TreeIG should be preferred. Select
+`TreeIGNumeric` explicitly for an unsupported model; `TreeIG` does not silently
+switch engines. This fallback sums prediction jumps, rather than estimating
+gradients and applying numerical quadrature to a piecewise-constant function.
 
 TreeIGNumeric scans a numerical grid along the integration path to locate
 changes in the prediction. It then bisects only the changed intervals, four
@@ -75,3 +78,27 @@ softmax of the centered log scores recovers the original probabilities. They
 do not reconstruct an unavailable training-time margin. TreeIGNumeric treats
 the derived score itself as the explicitly defined scalar model output and
 attributes its jumps after the ensemble probabilities have been aggregated.
+
+## Jump detection and completeness warnings
+
+`tol=0.0` detects every nonzero prediction difference observed by the search.
+It also controls local feature-probe comparisons. It is independent of
+`residual_atol=1e-12` and `residual_rtol=1e-10`, which control warnings only:
+
+```text
+abs(attribution_sum - endpoint_delta) >
+    residual_atol + residual_rtol * abs(endpoint_delta)
+```
+
+Diagnostics retain the actual residual even when it is below this threshold.
+Set both residual tolerances to zero to warn on any nonzero residual, or use
+`warn_residual=False` to disable that warning. A positive jump-detection `tol`
+can discard small changes, so check it as well as the grid and refinement
+settings when investigating a warning.
+
+Isolating every jump is not required for completeness: a bundled interval can
+contribute its full net prediction change through the cumulative feature sweep.
+Bundling may change the feature allocation, and offsetting jumps inside a cell
+can remain invisible even with a zero residual. These are allocation limitations,
+not reasons to require exhaustive refinement or replace event detection with
+generic numerical Integrated Gradients.

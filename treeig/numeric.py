@@ -22,8 +22,10 @@ Guarantees
 * Detected events telescope exactly. The sum of reported feature attributions
   equals the sum of detected prediction jumps.
 * The reported residual compares this detected jump sum with ``f(x) - f(x0)``.
-  A nonzero residual indicates that the event search did not fully recover the
-  endpoint prediction difference.
+  Residuals within floating-point tolerance are expected; larger residuals
+  indicate that the endpoint prediction difference was not fully recovered.
+  Completeness does not require isolating every jump and does not certify
+  featurewise allocation when crossings are bundled or cancel within a grid cell.
 * Featurewise attributions match exact split-crossing attributions when each
   detected event contains a single responsible crossing and the local
   axis-aligned probe identifies that feature.
@@ -84,7 +86,14 @@ class NumericEngine:
     t_min : float, default=1e-9
         Minimum path-time width for adaptive refinement.
     tol : float, default=0.0
-        Tolerance for comparing scalar predictions.
+        Jump-detection and local-probe comparison tolerance. Zero detects any
+        prediction change; this does not control completeness warnings.
+    residual_atol : float, default=1e-12
+        Absolute tolerance for completeness warnings, independent of ``tol``.
+    residual_rtol : float, default=1e-10
+        Relative tolerance for completeness warnings. The warning threshold is
+        ``residual_atol + residual_rtol * abs(endpoint_delta)``. Diagnostics
+        always retain the unmodified residual.
     warn_residual : bool, default=True
         Warn when the recovered attribution sum misses the endpoint difference.
     obs_chunk, atom_chunk : int
@@ -100,6 +109,8 @@ class NumericEngine:
         max_refine: int = 4,
         t_min: float = 1e-9,
         tol: float = 0.0,
+        residual_atol: float = 1e-12,
+        residual_rtol: float = 1e-10,
         warn_residual: bool = True,
         obs_chunk: int = 64,
         atom_chunk: int = 8192,
@@ -110,6 +121,8 @@ class NumericEngine:
         self.max_refine = int(max_refine)
         self.t_min = float(t_min)
         self.tol = float(tol)
+        self.residual_atol = float(residual_atol)
+        self.residual_rtol = float(residual_rtol)
         self.warn_residual = bool(warn_residual)
         self.obs_chunk = int(obs_chunk)
         self.atom_chunk = int(atom_chunk)
@@ -122,8 +135,10 @@ class NumericEngine:
             raise ValueError("max_refine must be nonnegative")
         if self.t_min <= 0.0:
             raise ValueError("t_min must be positive")
-        if self.tol < 0.0:
-            raise ValueError("tol must be nonnegative")
+        for name in ("tol", "residual_atol", "residual_rtol"):
+            value = getattr(self, name)
+            if not np.isfinite(value) or value < 0.0:
+                raise ValueError(f"{name} must be finite and nonnegative")
         if self.obs_chunk <= 0 or self.atom_chunk <= 0:
             raise ValueError("obs_chunk and atom_chunk must be positive")
 
@@ -259,10 +274,14 @@ class NumericEngine:
                 "max_refinement_depth": int(max_refinement_depth[i]),
                 "n_unresolved_intervals": int(unresolved_counts[i]),
             }
-            if self.warn_residual and abs_res > tol:
+            residual_limit = (
+                self.residual_atol
+                + self.residual_rtol * abs(endpoint_delta[i])
+            )
+            if self.warn_residual and abs_res > residual_limit:
                 warnings.warn(
                     "TreeIGNumeric did not recover f(x) - f(x0) within "
-                    "tolerance. Increase grid_size/max_refine or use "
+                    "residual tolerance. Check tol and grid_size/max_refine, or use "
                     "structure-based TreeIG when available.",
                     RuntimeWarning,
                     stacklevel=2,
@@ -368,9 +387,15 @@ class RefiningNumericEngine:
     tol : float, default=0.0
         Numerical tolerance used when deciding whether two scalar predictions
         differ.
+    residual_atol : float, default=1e-12
+        Absolute tolerance for completeness warnings, independent of ``tol``.
+    residual_rtol : float, default=1e-10
+        Relative tolerance for completeness warnings. The warning threshold is
+        ``residual_atol + residual_rtol * abs(endpoint_delta)``. Diagnostics
+        always retain the unmodified residual.
     warn_residual : bool, default=True
         Whether to warn when the recovered attribution sum differs from the
-        endpoint prediction difference by more than ``tol``.
+        endpoint prediction difference beyond the residual tolerances.
     """
 
     def __init__(
@@ -382,6 +407,8 @@ class RefiningNumericEngine:
         max_refine: int = 20,
         t_min: float = 1e-9,
         tol: float = 0.0,
+        residual_atol: float = 1e-12,
+        residual_rtol: float = 1e-10,
         warn_residual: bool = True,
     ) -> None:
         self.f = f
@@ -390,6 +417,8 @@ class RefiningNumericEngine:
         self.max_refine = int(max_refine)
         self.t_min = float(t_min)
         self.tol = float(tol)
+        self.residual_atol = float(residual_atol)
+        self.residual_rtol = float(residual_rtol)
         self.warn_residual = bool(warn_residual)
 
         if self.p <= 0:
@@ -400,8 +429,10 @@ class RefiningNumericEngine:
             raise ValueError("max_refine must be nonnegative")
         if self.t_min <= 0.0:
             raise ValueError("t_min must be positive")
-        if self.tol < 0.0:
-            raise ValueError("tol must be nonnegative")
+        for name in ("tol", "residual_atol", "residual_rtol"):
+            value = getattr(self, name)
+            if not np.isfinite(value) or value < 0.0:
+                raise ValueError(f"{name} must be finite and nonnegative")
 
     # -- public ------------------------------------------------------------
     def attribute(self, x0: ArrayF, X: ArrayF) -> Tuple[ArrayF, List[Dict]]:
@@ -462,10 +493,13 @@ class RefiningNumericEngine:
         info["residual"] = attribution_sum - endpoint_delta
         info["abs_residual"] = abs(info["residual"])
 
-        if self.warn_residual and info["abs_residual"] > self.tol:
+        residual_limit = (
+            self.residual_atol + self.residual_rtol * abs(endpoint_delta)
+        )
+        if self.warn_residual and info["abs_residual"] > residual_limit:
             warnings.warn(
-                "TreeIGNumeric did not recover f(x) - f(x0) within tolerance. "
-                "Increase grid_size/max_refine or use structure-based TreeIG "
+                "TreeIGNumeric did not recover f(x) - f(x0) within residual tolerance. "
+                "Check tol and grid_size/max_refine, or use structure-based TreeIG "
                 "when available.",
                 RuntimeWarning,
                 stacklevel=2,
@@ -1013,8 +1047,9 @@ class TreeIGNumeric:
         probabilities raise rather than being clipped silently.
     **engine_kwargs
         Optional controls passed to :class:`NumericEngine`, such as
-        ``grid_size``, ``max_refine``, ``t_min``, ``tol``, and
-        ``warn_residual``. See :class:`NumericEngine` for details.
+        ``grid_size``, ``max_refine``, ``t_min``, ``tol``,
+        ``residual_atol``, ``residual_rtol``, and ``warn_residual``.
+        See :class:`NumericEngine` for details.
 
     Notes
     -----

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Separate numerical jump-detection tolerance from absolute and relative completeness-warning tolerances; retain raw residual diagnostics.
+- Clarify jump-based fallback behavior, bundled-event completeness, and XGBoost prediction precision.
+- Check numeric regression tests with unexpected runtime warnings treated as errors in CI.
+
 ## 0.2.0
 
 - Add optional `treeig.GPUTreeIG` prediction attribution with persistent CUDA model and weighted-baseline state and reusable observation buffers.

@@ -1,10 +1,12 @@
 """Engine-level tests that need no model library: they pass synthetic
 piecewise-constant functions directly to NumericEngine."""
 
+import warnings
+
 import numpy as np
 import pytest
 
-from treeig.numeric import NumericEngine, TreeIGNumeric
+from treeig.numeric import NumericEngine, RefiningNumericEngine, TreeIGNumeric
 
 
 def step(v, thr, lo, hi):
@@ -119,7 +121,8 @@ def test_non_moving_feature_zero():
     print("non-moving:", phi[0])
 
 
-def test_completeness_random_forest_like():
+@pytest.mark.parametrize("engine_cls", [NumericEngine, RefiningNumericEngine])
+def test_completeness_random_forest_like(engine_cls):
     rng = np.random.default_rng(0)
     p = 6
     thr = rng.uniform(0.2, 0.8, size=(40, p))
@@ -132,7 +135,7 @@ def test_completeness_random_forest_like():
             out += w[k] * (P[:, feat[k]] >= thr[k, feat[k]])
         return out
 
-    eng = NumericEngine(f, n_features=p)
+    eng = engine_cls(f, n_features=p)
     x0 = np.zeros(p)
     X = rng.uniform(0, 1, size=(10, p))
     phi, infos = eng.attribute(x0, X)
@@ -300,5 +303,61 @@ if __name__ == "__main__":
     test_conjunction_separated()
     test_conjunction_coincident()
     test_non_moving_feature_zero()
-    test_completeness_random_forest_like()
+    test_completeness_random_forest_like(NumericEngine)
     print("\nall engine tests passed")
+
+
+@pytest.mark.parametrize("engine_cls", [NumericEngine, RefiningNumericEngine])
+@pytest.mark.parametrize("large_jump", [1.0, 1e9])
+def test_residual_tolerances_preserve_diagnostics(engine_cls, large_jump):
+    def f(P):
+        return (0.05 * (P[:, 0] >= 0.25)
+                + large_jump * (P[:, 0] >= 0.75))
+
+    # A positive detection tolerance deliberately drops the first small jump.
+    kwargs = dict(n_features=1, grid_size=4, max_refine=0, tol=0.1)
+    engine = engine_cls(f, **kwargs)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        if large_jump == 1.0:
+            with pytest.warns(RuntimeWarning, match="residual tolerance"):
+                phi, infos = engine.attribute([0.0], [[1.0]])
+        else:
+            phi, infos = engine.attribute([0.0], [[1.0]])
+    np.testing.assert_allclose(phi, [[large_jump]])
+    assert infos[0]["abs_residual"] == pytest.approx(0.05, abs=1e-6)
+
+    # Absolute tolerance and disabling warnings affect only warnings.
+    for controls in ({"residual_atol": 0.1, "residual_rtol": 0.0},
+                     {"warn_residual": False}):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            quiet_phi, quiet_infos = engine_cls(f, **kwargs, **controls).attribute(
+                [0.0], [[1.0]]
+            )
+        np.testing.assert_array_equal(quiet_phi, phi)
+        assert quiet_infos == infos
+
+    with pytest.warns(RuntimeWarning, match="residual tolerance"):
+        engine_cls(f, **kwargs, residual_atol=0.0, residual_rtol=0.0).attribute(
+            [0.0], [[1.0]]
+        )
+
+
+@pytest.mark.parametrize("engine_cls", [NumericEngine, RefiningNumericEngine])
+@pytest.mark.parametrize("name", ["tol", "residual_atol", "residual_rtol"])
+@pytest.mark.parametrize("value", [-1.0, np.nan, np.inf])
+def test_tolerances_must_be_finite_nonnegative(engine_cls, name, value):
+    with pytest.raises(ValueError, match=name):
+        engine_cls(lambda P: P[:, 0], n_features=1, **{name: value})
+
+
+def test_public_fallback_keeps_small_jumps_with_loose_residual_tolerance():
+    class UnknownTreeModel:
+        def predict(self, X):
+            return 1e-14 * (X[:, 0] >= 0.5)
+
+    explainer = TreeIGNumeric(
+        UnknownTreeModel(), [0.0], residual_atol=1.0, residual_rtol=0.0
+    )
+    np.testing.assert_array_equal(explainer.attribute([[1.0]]), [[1e-14]])

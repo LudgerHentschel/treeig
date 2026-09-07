@@ -77,6 +77,12 @@ TreeIG follows each backend's split-routing convention as closely as possible.
 - XGBoost numeric splits route left when `x[j] < threshold`
   using float32-style comparisons.
 
+XGBoost completeness comparisons against native raw predictions can show small
+residuals (around `1e-7` in tested models), consistent with differences in floating-point
+precision and accumulation between the native predictor and the attribution
+calculation. This is not a universal error bound or a numerical integration
+resolution; compare residuals relative to the scale of the explained output.
+
 Inputs must be finite numeric arrays. Missing-value routing is not currently
 implemented, so `NaN` and `Inf` values raise errors.
 
