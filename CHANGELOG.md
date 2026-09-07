@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1
 
 - Separate numerical jump-detection tolerance from absolute and relative completeness-warning tolerances; retain raw residual diagnostics.
 - Clarify jump-based fallback behavior, bundled-event completeness, and XGBoost prediction precision.
