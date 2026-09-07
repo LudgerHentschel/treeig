@@ -51,6 +51,7 @@ numeric
 performance
 comparison
 gpu
+ig-stack
 ```
 
 ```{toctree}
