@@ -117,3 +117,5 @@ If you use TreeIG in your work, please cite the
 ```
 
 Released under the [BSD-3-Clause license](https://github.com/LudgerHentschel/treeig/blob/main/LICENSE).
+
+Release maintainers: see [Publishing releases](docs/publishing.md).
