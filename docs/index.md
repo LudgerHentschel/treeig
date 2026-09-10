@@ -1,32 +1,40 @@
 # TreeIG documentation
 
-TreeIG computes exact Integrated Gradients for supported tree models by summing
-prediction jumps along paths from a baseline to each observation. The CPU
-`TreeIG` class is the main interface.
+**TreeIG computes exact Integrated Gradients for tree models. A tree's gradient
+is zero almost everywhere; its integrated gradient is not.**
 
-Start with a runnable example, then choose the baseline distribution and output
-scale that express the comparison you want to explain.
+Tree ensembles are piecewise constant, so $\nabla F = 0$ except on a
+measure-zero set of split boundaries. Numerical Integrated Gradients therefore
+recovers approximately nothing, which is why IG has largely been confined to
+differentiable models.
 
-The method is developed in Ludger Hentschel's
-[**TreeIG: Exact Integrated Gradients for Tree-Based Models**](https://www.ludgerhentschel.com/PDFs/Hentschel%20'26g.pdf).
-It builds on Integrated Gradients introduced by Sundararajan, Taly, and Yan in
-[**Axiomatic Attribution for Deep Networks** (ICML 2017)](https://proceedings.mlr.press/v70/sundararajan17a.html).
-
-## Why Integrated Gradients works for trees
-
-A tree prediction is constant between splits, so its ordinary gradient is zero
-almost everywhere. But the prediction jumps at split boundaries. Those jumps
-are the contribution that an ordinary pointwise gradient misses: in the
-distributional interpretation, each jump is an impulse whose integral equals
-the jump's height.
+The pointwise gradient is not the full derivative. In the distributional sense,
+$F'$ carries an impulse at each split boundary whose integral equals the
+prediction jump there.
 
 ![A prediction step, its derivative impulse, and its integrated contribution](Figure_TreeGradient.svg)
 
 The top panel shows a single prediction step; the middle shows its derivative
 as an impulse at the split; the bottom shows the accumulated contribution.
-Integrating across the split recovers the prediction change. TreeIG applies
-this idea along the path from a baseline to an observation, assigning each
-crossing's jump to its split feature and summing across trees.
+Integrating across the split recovers the prediction change.
+
+TreeIG enumerates the boundaries crossed by the straight-line path from baseline
+to observation, assigns each jump to its split feature, and sums across trees.
+No quadrature and no sampling are involved, and completeness
+
+$$\sum_j \phi_j = F(x) - F(x_0)$$
+
+holds to the floating-point precision of the fitted model's own arithmetic.
+Weighted baseline distributions are supported directly.
+
+The CPU `TreeIG` class is the main interface. Start with a runnable example,
+then choose the baseline distribution and output scale that express the
+comparison you want to explain.
+
+The method is developed in Ludger Hentschel's
+[**TreeIG: Exact Integrated Gradients for Tree-Based Models**](https://www.ludgerhentschel.com/PDFs/Hentschel%20'26g.pdf).
+It builds on Integrated Gradients introduced by Sundararajan, Taly, and Yan in
+[**Axiomatic Attribution for Deep Networks** (ICML 2017)](https://proceedings.mlr.press/v70/sundararajan17a.html).
 
 ## Explore the guide
 

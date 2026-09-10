@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Lead the README and documentation landing page with the piecewise-constant
+  gradient argument, and move the derivative-impulse figure above the fold.
+- State completeness precision relative to the fitted model's own arithmetic
+  rather than unqualified floating-point precision.
+
 ## 0.2.1
 
 - Separate numerical jump-detection tolerance from absolute and relative completeness-warning tolerances; retain raw residual diagnostics.
