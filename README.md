@@ -3,20 +3,8 @@
 [![PyPI version](https://img.shields.io/pypi/v/treeig.svg)](https://pypi.org/project/treeig/)
 [![Documentation](https://img.shields.io/badge/docs-user%20guide-blue)](https://ludgerhentschel.github.io/treeig/)
 
-TreeIG is a Python package for Integrated Gradients feature attribution on
-supported numeric tree models. Install and import it as `treeig`. Given a fitted
-model, a baseline point or weighted background, and evaluation rows, `TreeIG`
-returns feature contributions and completeness diagnostics.
-
 **TreeIG computes exact Integrated Gradients for supported numeric tree models.
-A tree's gradient is zero almost everywhere; its integrated gradient is not.**
-
-Check [supported models](https://ludgerhentschel.github.io/treeig/models.html) before choosing an interface.
-`TreeIG` uses exact structural split crossings; [TreeIGNumeric](https://ludgerhentschel.github.io/treeig/numeric.html)
-is a separately selected numerical fallback. Exact classification explains raw
-margins or logits. Exact parsing requires finite numeric inputs and does not
-support categorical splits or missing-value routing. Installing the CatBoost
-extra does not add an exact CatBoost backend.
+A tree's gradient is not well defined; its integrated gradient is.**
 
 Tree ensembles are piecewise constant, so $\nabla F = 0$ except on a
 measure-zero set of split boundaries. Numerical Integrated Gradients therefore
