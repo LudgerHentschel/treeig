@@ -47,6 +47,7 @@ dependencies = [
 [project.optional-dependencies]
 docs = [
     "sphinx>=7,<9",
+    "sphinx-sitemap>=2.6,<3",
     "myst-parser>=3,<5",
     "pydata-sphinx-theme>=0.16,<0.17",
 ]

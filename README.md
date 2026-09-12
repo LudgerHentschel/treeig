@@ -3,8 +3,20 @@
 [![PyPI version](https://img.shields.io/pypi/v/treeig.svg)](https://pypi.org/project/treeig/)
 [![Documentation](https://img.shields.io/badge/docs-user%20guide-blue)](https://ludgerhentschel.github.io/treeig/)
 
-**TreeIG computes exact Integrated Gradients for tree models. A tree's gradient
-is zero almost everywhere; its integrated gradient is not.**
+TreeIG is a Python package for Integrated Gradients feature attribution on
+supported numeric tree models. Install and import it as `treeig`. Given a fitted
+model, a baseline point or weighted background, and evaluation rows, `TreeIG`
+returns feature contributions and completeness diagnostics.
+
+**TreeIG computes exact Integrated Gradients for supported numeric tree models.
+A tree's gradient is zero almost everywhere; its integrated gradient is not.**
+
+Check [supported models](https://ludgerhentschel.github.io/treeig/models.html) before choosing an interface.
+`TreeIG` uses exact structural split crossings; [TreeIGNumeric](https://ludgerhentschel.github.io/treeig/numeric.html)
+is a separately selected numerical fallback. Exact classification explains raw
+margins or logits. Exact parsing requires finite numeric inputs and does not
+support categorical splits or missing-value routing. Installing the CatBoost
+extra does not add an exact CatBoost backend.
 
 Tree ensembles are piecewise constant, so $\nabla F = 0$ except on a
 measure-zero set of split boundaries. Numerical Integrated Gradients therefore
@@ -47,7 +59,9 @@ for plotting. The first attribution call includes Numba compilation.
 
 ## Quickstart
 
-With a fitted supported model and numeric evaluation data:
+This snippet assumes a fitted supported model and numeric evaluation data.
+For a standalone example that creates data, fits a model, and checks prediction
+reconstruction, start with [the complete quickstart](https://ludgerhentschel.github.io/treeig/getting-started.html).
 
 ```python
 from treeig import TreeIG
@@ -78,7 +92,9 @@ splits and missing-value routing are not supported by the exact parser.
 
 `TreeIGNumeric` provides a numerical fallback for other piecewise-constant models,
 including numeric-input CatBoost and probability-only classifiers. Its resolution
-requires care. See [supported models](https://ludgerhentschel.github.io/treeig/models.html)
+requires care. For probability-only classifiers, its default output is a class
+probability; score conversion is an explicit option. A small completeness
+residual alone does not establish accurate individual feature allocations. See [supported models](https://ludgerhentschel.github.io/treeig/models.html)
 and [the numerical guide](https://ludgerhentschel.github.io/treeig/numeric.html).
 
 TreeIG and TreeSHAP answer different attribution questions. TreeIG can be fast
@@ -87,6 +103,9 @@ baselines, and batch size. The [comparison and benchmarks](https://ludgerhentsch
 explain the distinction and report measured examples.
 
 ## Documentation
+
+For automated readers, [llms.txt](https://ludgerhentschel.github.io/treeig/llms.txt)
+maps the guides, complete examples, and rendered API reference.
 
 The [user guide](https://ludgerhentschel.github.io/treeig/)
 covers a complete runnable example, baseline distributions, classification,
@@ -102,6 +121,18 @@ be materially faster; recorded T4 comparisons show roughly 9–20× speedups on
 the reported workloads. Performance depends on the problem. See
 [GPU documentation](https://ludgerhentschel.github.io/treeig/gpu.html)
 for installation and limitations.
+
+## Related projects
+
+| Package | When to use it |
+|---|---|
+| [UnifiedIG](https://ludgerhentschel.github.io/unifiedig/) (`unifiedig`) | A common Integrated Gradients interface across supported tree and smooth model families. |
+| [CBaseline](https://ludgerhentschel.github.io/cbaseline/) (`cbaseline`) | Construct empirical reference distributions; TreeIG accepts its backgrounds with their weights directly. |
+| [skgrad](https://ludgerhentschel.github.io/skgrad/) (`skgrad`) | Obtain analytic input gradients and Jacobians for supported smooth scikit-learn models. |
+
+Use TreeIG directly when you need its tree-specific attribution interface.
+See [the Integrated Gradients stack](https://ludgerhentschel.github.io/treeig/ig-stack.html)
+for how the packages compose and why output scales must agree.
 
 ## Citation and license
 

@@ -1,0 +1,44 @@
+# TreeIG
+
+> TreeIG (`treeig`) is a Python package for Integrated Gradients feature attribution on supported numeric tree models. Its exact TreeIG interface enumerates structural split crossings; TreeIGNumeric is a separately selected numerical jump-detection fallback.
+
+Install with `pip install "treeig[sklearn]"` for scikit-learn examples (Python 3.9+). NumPy and Numba are runtime dependencies. Install the model library you use; extras include sklearn, xgboost, lightgbm, and catboost. The CatBoost extra does not provide an exact CatBoost backend. The first attribution call includes Numba compilation.
+
+Import with `from treeig import TreeIG`. The primary workflow is `ig = TreeIG(model, baseline=x0)` followed by `result = ig.explain(X_eval)`. Use `ig.attribute(X_eval)` for an attribution array. For a selected scalar output, `result.values` has shape `(samples, features)`. Contributions sum to the explained output difference relative to the baseline, within floating-point precision. Weighted baseline distributions are supported; CBaseline Background objects supply rows and weights directly.
+
+Exact support includes selected scikit-learn regressors and gradient boosting, XGBoost, and LightGBM, subject to model and parser restrictions. Exact classification explains raw margins or logits, not probabilities. Inputs must be finite and numeric; categorical splits and missing-value routing are outside the exact parser's support.
+
+Choose TreeIGNumeric explicitly for supported numerical workflows; TreeIG does not silently switch engines. For probability-only classifiers, TreeIGNumeric defaults to one class probability. `probability_to_score=True` requests binary log odds or centered multiclass log scores; zero probabilities require an explicit `probability_floor`. Numeric or encoded CatBoost inputs can use the fallback; native categorical interpolation remains outside the meaningful path contract.
+
+Numerical jump detection can merge or miss nearby crossings. A small completeness residual does not guarantee accurate individual feature allocations. Compare attributions at increased grid resolution when allocation accuracy matters. Exact TreeIG enumerates crossings directly and does not use this numerical search.
+
+## Start here
+
+- [Installation and complete quickstart](https://ludgerhentschel.github.io/treeig/getting-started.html): Generate data, fit a regression model, explain it, and check prediction reconstruction.
+- [Supported models](https://ludgerhentschel.github.io/treeig/models.html): Exact model families, classification margins, parser restrictions, and unsupported cases.
+- [Baselines](https://ludgerhentschel.github.io/treeig/baselines.html): Reference points, weighted distributions, and CBaseline integration.
+- [Results and classification targets](https://ludgerhentschel.github.io/treeig/explanations.html): Output shapes, target positions, completeness, and plotting.
+- [TreeIGNumeric](https://ludgerhentschel.github.io/treeig/numeric.html): Explicit numerical fallback, probability and score outputs, resolution controls, and allocation limitations.
+
+## Examples and reference
+
+- [Worked examples](https://ludgerhentschel.github.io/treeig/examples.html): Complete XGBoost regression and LightGBM multiclass examples.
+- [API reference](https://ludgerhentschel.github.io/treeig/api.html): Rendered TreeIG, TreeIGNumeric, Explanation, and public function documentation. Raw Sphinx sources contain unexpanded autodoc instructions.
+- [Numerical conventions](https://ludgerhentschel.github.io/treeig/concepts.html): Path crossings, floating-point conventions, and completeness.
+- [Loss attribution](https://ludgerhentschel.github.io/treeig/loss.html): Loss contrasts and their interpretation.
+- [Comparison with TreeSHAP](https://ludgerhentschel.github.io/treeig/comparison.html): Different attribution questions and measured workload comparisons.
+- [Performance](https://ludgerhentschel.github.io/treeig/performance.html): Compilation, batching, and workload-dependent performance.
+- [Optional GPU support](https://ludgerhentschel.github.io/treeig/gpu.html): NVIDIA GPU installation, interface, and limitations; CPU TreeIG remains the default.
+
+## Related projects
+
+- [Integrated Gradients stack](https://ludgerhentschel.github.io/treeig/ig-stack.html): How reference distributions, tree paths, and input derivatives compose.
+- [UnifiedIG](https://ludgerhentschel.github.io/unifiedig/): A common Integrated Gradients attribution interface across supported tree and smooth model families.
+- [CBaseline](https://ludgerhentschel.github.io/cbaseline/): Empirical reference distributions for IG, SHAP, and compatible attribution methods.
+- [skgrad](https://ludgerhentschel.github.io/skgrad/): Analytic input gradients and Jacobians for supported fitted scikit-learn models.
+
+## Development and methodology
+
+- [Repository](https://github.com/ludgerhentschel/treeig): Source code, tests, and benchmarks.
+- [References and citation](https://ludgerhentschel.github.io/treeig/references.html): Methodology papers and citation information.
+- [Documentation build](https://ludgerhentschel.github.io/treeig/building.html): Build and validate the site and discovery files.

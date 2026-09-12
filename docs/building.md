@@ -9,6 +9,7 @@ From the repository root, using Python 3.11 or later:
 ```bash
 python -m pip install -e ".[docs]"
 python -m sphinx -W --keep-going -b html docs docs/_build/html
+python scripts/check_docs_discovery.py
 ```
 
 Open `docs/_build/html/index.html` in a browser. Documentation dependencies are
@@ -26,3 +27,19 @@ job publishes the site. No package version change or release tag is required.
 Edit the topic pages under `docs/`; keep the README focused on installation,
 a first example, and links into the guide. Version information comes from
 `pyproject.toml`. Generated HTML should not be committed.
+
+## Discovery files
+
+Maintain the repository-root `llms.txt` as an annotated map to the published
+site. Sphinx copies this single source through `html_extra_path`. Link to
+rendered API pages so readers receive expanded signatures and docstrings,
+rather than the autodoc instructions in raw Sphinx sources.
+
+`sphinx-sitemap` generates `sitemap.xml` using `html_baseurl`, which also supplies
+canonical page URLs. Important pages define descriptions in `myst.html_meta`
+YAML front matter. Keep `docs/requirements.txt` and the `docs` extra synchronized.
+
+The discovery check runs after the HTML build in CI. It checks the index copy,
+local targets, sitemap URLs, canonical links, descriptions, and expanded API and
+example content. After deployment, check the public `/treeig/llms.txt` and
+`/treeig/sitemap.xml` endpoints and external links in the index.

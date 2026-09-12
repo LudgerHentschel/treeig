@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Choose TreeIG baseline points or weighted reference distributions, including CBaseline backgrounds."
+---
+
 # Choosing baselines and batching
 
 The baseline determines the question an attribution answers. With one baseline,
@@ -14,15 +20,18 @@ model need not satisfy $F(\sum_k w_k b_k)=\sum_k w_k F(b_k)$.
 
 For Integrated Gradients, the baseline determines the prediction contrast
 being explained. **[CBaseline](https://github.com/LudgerHentschel/cbaseline) is the
-preferred way to construct TreeIG baselines.** CBaseline produces empirical,
-prediction-neutral baseline *distributions* whose weighted mean model output is
-the chosen reference prediction. TreeIG then explains the model prediction
-relative to that reference level rather than relative to an arbitrary feature
-vector such as the feature-wise mean.
+preferred way to construct TreeIG baselines.** Its calibrated mode produces
+empirical baseline *distributions* whose weighted mean model output meets the
+chosen reference prediction within numerical tolerances, or raises on failure.
+Equal-weight selections approximate neutrality and report their residual.
+TreeIG explains the model prediction relative to the **achieved weighted mean**,
+so preserve both the rows and weights when passing a background.
 
 TreeIG accepts a CBaseline `Background` directly and evaluates its weighted
 baseline paths efficiently. See CBaseline for construction choices and the
-interpretation of the reference prediction `f0`.
+interpretation of the reference prediction `f0`: start with
+[background modes](https://ludgerhentschel.github.io/cbaseline/backgrounds.html)
+and [diagnostics](https://ludgerhentschel.github.io/cbaseline/diagnostics.html).
 
 A single representative observation, domain-specific neutral input, or fixed
 benchmark case is also supported. A sample mean is convenient for a first

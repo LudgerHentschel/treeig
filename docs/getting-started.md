@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Install TreeIG and run a complete regression example with fitted tree models, baseline inputs, and completeness checks."
+---
+
 # Getting started
 
 ## Installation

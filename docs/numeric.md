@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Use TreeIGNumeric for explicit numerical jump detection and understand probability outputs, score conversion, and resolution limits."
+---
+
 # TreeIGNumeric
 
 TreeIGNumeric is a model-agnostic fallback that recovers the crossing-sum

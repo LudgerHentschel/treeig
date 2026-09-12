@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Check exact TreeIG model support, classification margins, parser restrictions, and models requiring TreeIGNumeric."
+---
+
 # Supported models
 
 TreeIG currently supports tree models with finite numeric feature inputs.

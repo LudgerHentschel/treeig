@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Understand TreeIG numerical conventions, path crossings, and completeness."
+---
+
 # Attribution and interpretation
 
 ## Why TreeIG?

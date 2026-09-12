@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Look up TreeIG, TreeIGNumeric, Explanation, and public functions in the rendered API reference."
+---
+
 # API reference
 
 The primary interfaces are `TreeIG` for exact structural attribution,

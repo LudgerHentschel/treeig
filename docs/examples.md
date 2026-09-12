@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Run complete TreeIG examples for XGBoost regression and LightGBM multiclass margins."
+---
+
 # Worked examples
 
 These examples use synthetic data so they can run without downloading datasets.

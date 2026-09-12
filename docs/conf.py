@@ -8,7 +8,7 @@ project = "TreeIG"
 author = "Ludger Hentschel"
 copyright = "2026, Ludger Hentschel"
 release = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
-extensions = ["myst_parser", "sphinx.ext.autodoc", "sphinx.ext.napoleon", "sphinx.ext.mathjax"]
+extensions = ["myst_parser", "sphinx.ext.autodoc", "sphinx.ext.napoleon", "sphinx.ext.mathjax", "sphinx_sitemap"]
 myst_enable_extensions = ["dollarmath"]
 myst_heading_anchors = 3
 exclude_patterns = ["_build"]
@@ -21,3 +21,9 @@ napoleon_google_docstring = False
 
 templates_path = ["_templates"]
 html_sidebars = {"**": ["documentation-nav.html"]}
+
+html_baseurl = "https://ludgerhentschel.github.io/treeig/"
+# Publish the single maintained repository index with the documentation.
+html_extra_path = ["../llms.txt"]
+sitemap_url_scheme = "{link}"
+sitemap_excludes = ["search.html", "genindex.html", "py-modindex.html"]

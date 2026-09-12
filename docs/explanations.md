@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Interpret TreeIG feature contributions, classification targets, result shapes, and completeness diagnostics."
+---
+
 # Reading and plotting results
 
 ## Explanation objects and SHAP plots
