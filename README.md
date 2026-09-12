@@ -92,8 +92,10 @@ splits and missing-value routing are not supported by the exact parser.
 
 `TreeIGNumeric` provides a numerical fallback for other piecewise-constant models,
 including numeric-input CatBoost and probability-only classifiers. Its resolution
-requires care. For probability-only classifiers, its default output is a class
-probability; score conversion is an explicit option. A small completeness
+requires care. For probability-only classifiers, it defaults to binary log odds
+or centered multiclass log scores; class probabilities require explicit
+`probability_to_score=False`. Zero probabilities require an explicit
+`probability_floor` for score conversion. A small completeness
 residual alone does not establish accurate individual feature allocations. See [supported models](https://ludgerhentschel.github.io/treeig/models.html)
 and [the numerical guide](https://ludgerhentschel.github.io/treeig/numeric.html).
 

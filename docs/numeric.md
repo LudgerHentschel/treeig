@@ -42,10 +42,10 @@ Two caveats on coverage:
   feature along the straight-line path is not meaningful, which is a property of
   Integrated Gradients itself, not of the implementation. TreeIGNumeric works on
   CatBoost (and similar) models with numeric or one-hot-encoded inputs.
-- **Probability-averaging classifiers.** By default, TreeIGNumeric retains its
-  original behavior and explains one class probability. With
-  `probability_to_score=True`, it instead explains binary log odds or a
-  centered multiclass log score. Zero probabilities require an explicit
+- **Probability-averaging classifiers.** By default, TreeIGNumeric explains
+  binary log odds or a centered multiclass log score derived from the complete
+  probability vector (`probability_to_score=True`). Class-probability
+  attribution requires explicit `probability_to_score=False`. Zero probabilities require an explicit
   `probability_floor`; TreeIGNumeric never clips them silently.
 
 ```python
@@ -66,7 +66,7 @@ ig = tig.TreeIGNumeric(
     model,
     baseline=x0,
     target=2,                    # omit for binary positive-class log odds
-    probability_to_score=True,
+    # Score conversion is the default when no native margin exists.
     probability_floor=1e-6,     # explicit because tree probabilities may be 0
 )
 phi = ig.attribute(X_eval)
@@ -108,3 +108,14 @@ Bundling may change the feature allocation, and offsetting jumps inside a cell
 can remain invisible even with a zero residual. These are allocation limitations,
 not reasons to require exhaustive refinement or replace event detection with
 generic numerical Integrated Gradients.
+
+## Compatibility with earlier releases
+
+Previously, probability-only classifiers defaulted to class-probability
+attribution. The default now explains scores. Existing callers that require the
+previous probability-valued result must pass `probability_to_score=False`
+explicitly. This option affects only classifiers without a native margin;
+models exposing native scores continue to explain those scores. Zero class
+probabilities now raise by default during score evaluation unless an explicit
+`probability_floor` defines finite scores. Reconstruct background reference
+outputs on the same scale as the explainer before comparing attributions.

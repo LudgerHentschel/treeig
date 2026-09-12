@@ -745,7 +745,7 @@ def make_scalar_fn(
     model,
     target=None,
     *,
-    probability_to_score: bool = False,
+    probability_to_score: bool = True,
     probability_floor=None,
 ) -> ScalarFn:
     """Construct a vectorized scalar-output function for attribution.
@@ -766,8 +766,9 @@ def make_scalar_fn(
     For classifiers, the preferred quantity is an additive raw margin or
     logit because additive outputs preserve the natural completeness property
     of attribution methods. When no margin interface is available, the
-    function falls back to class probabilities, in which case completeness
-    holds in probability space rather than margin space.
+    function derives binary log odds or centered multiclass log scores from
+    probabilities by default. Class-probability attribution requires explicit
+    ``probability_to_score=False``; completeness then holds in probability space.
 
     If the fitted model is already supported by exact structure-based
     ``TreeIG``, this helper emits a warning. The numeric path remains
@@ -795,9 +796,10 @@ def make_scalar_fn(
         For binary classifiers, ``None`` selects the positive-class margin
         when available. For multiclass classifiers, an explicit target index
         is required whenever the model returns one score per class.
-    probability_to_score : bool, default=False
+    probability_to_score : bool, default=True
         When no native margin exists, explain binary log odds or centered
-        multiclass log probabilities rather than a class probability.
+        multiclass log probabilities by default. Set explicitly to ``False``
+        to explain a class probability instead; native margins still take precedence.
     probability_floor : float or None, default=None
         Explicit lower bound applied before taking logarithms. If omitted,
         encountering a zero probability raises an actionable error.
@@ -1032,16 +1034,18 @@ class TreeIGNumeric:
     ----------
     model : object
         Fitted model exposing a supported prediction interface. Raw margins are
-        used when available. Probability outputs are used only as a fallback.
+        used when available; otherwise scores are derived from probabilities
+        by default. Class probabilities require explicit opt-in.
     baseline : array-like of shape (p,)
         Baseline input ``x0`` for the interpolation path.
     target : int or None, default=None
         Target output for classification models. Binary classifiers default to
-        the positive-class margin or probability where possible. Multiclass
+        the positive-class margin or derived log odds. Multiclass
         outputs require an explicit target.
-    probability_to_score : bool, default=False
+    probability_to_score : bool, default=True
         For classifiers without native margins, transform probabilities to
-        binary log odds or centered multiclass log scores.
+        binary log odds or centered multiclass log scores. Set explicitly to
+        ``False`` to explain a class probability instead.
     probability_floor : float or None, default=None
         Explicit lower bound used before the logarithm. Without a floor, zero
         probabilities raise rather than being clipped silently.
@@ -1065,7 +1069,7 @@ class TreeIGNumeric:
         baseline,
         target=None,
         *,
-        probability_to_score: bool = False,
+        probability_to_score: bool = True,
         probability_floor=None,
         **engine_kwargs,
     ) -> None:
@@ -1106,8 +1110,10 @@ class TreeIGNumeric:
         """Return the scalar model output attributed by this explainer.
 
         The output scale follows the model adapter: raw margins are preferred
-        for classifiers, probabilities are used only when no margin interface
-        exists, and regressors use their predictions. ``target`` selection is
+        for classifiers, derived log scores are used when no margin interface
+        exists, and regressors use their predictions. Class probabilities are
+        attributed only with explicit ``probability_to_score=False`` and no
+        native margin interface. ``target`` selection is
         the same as for :meth:`attribute`.
         """
 

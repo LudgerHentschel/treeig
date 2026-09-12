@@ -8,7 +8,7 @@ Import with `from treeig import TreeIG`. The primary workflow is `ig = TreeIG(mo
 
 Exact support includes selected scikit-learn regressors and gradient boosting, XGBoost, and LightGBM, subject to model and parser restrictions. Exact classification explains raw margins or logits, not probabilities. Inputs must be finite and numeric; categorical splits and missing-value routing are outside the exact parser's support.
 
-Choose TreeIGNumeric explicitly for supported numerical workflows; TreeIG does not silently switch engines. For probability-only classifiers, TreeIGNumeric defaults to one class probability. `probability_to_score=True` requests binary log odds or centered multiclass log scores; zero probabilities require an explicit `probability_floor`. Numeric or encoded CatBoost inputs can use the fallback; native categorical interpolation remains outside the meaningful path contract.
+Choose TreeIGNumeric explicitly for supported numerical workflows; TreeIG does not silently switch engines. For probability-only classifiers, TreeIGNumeric defaults to binary log odds or centered multiclass log scores (`probability_to_score=True`); zero probabilities require an explicit `probability_floor`. Explaining a class probability requires explicit `probability_to_score=False`. Numeric or encoded CatBoost inputs can use the fallback; native categorical interpolation remains outside the meaningful path contract.
 
 Numerical jump detection can merge or miss nearby crossings. A small completeness residual does not guarantee accurate individual feature allocations. Compare attributions at increased grid resolution when allocation accuracy matters. Exact TreeIG enumerates crossings directly and does not use this numerical search.
 

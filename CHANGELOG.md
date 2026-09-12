@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Change `TreeIGNumeric` and `make_scalar_fn` to derive classification scores
+  by default when no native margin exists: binary log odds or centered
+  multiclass log probabilities. `compute_numeric` inherits this default.
+  Callers requiring the former class-probability output must explicitly set
+  `probability_to_score=False`. Zero probabilities require an explicit
+  `probability_floor` for finite scores; no floor is chosen silently.
+
 - Lead the README and documentation landing page with the piecewise-constant
   gradient argument, and move the derivative-impulse figure above the fold.
 - State completeness precision relative to the fitted model's own arithmetic

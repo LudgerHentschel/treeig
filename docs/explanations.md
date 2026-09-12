@@ -84,8 +84,10 @@ ig = tig.TreeIG(model, baseline=x0, target=2)
 phi_class_2 = ig.attribute(X_eval)
 ```
 
-Exact TreeIG attributes raw class margins. TreeIGNumeric can use the explicit
-probability-derived score convention above when no native margin exists.
+Exact TreeIG attributes raw class margins. When no native margin exists,
+TreeIGNumeric defaults to binary log odds or centered multiclass log scores
+derived from probabilities. See [numerical classification conventions](numeric.md)
+for explicit floors at zero and the opt-in class-probability mode.
 
 ## Functional interface
 

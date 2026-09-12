@@ -185,7 +185,7 @@ def _floored_scores(model, X, floor):
     return np.log(proba)
 
 
-def test_binary_probability_classifier_can_explain_log_odds():
+def test_binary_probability_classifier_defaults_to_log_odds():
     from sklearn.ensemble import RandomForestClassifier
 
     X = np.array(
@@ -201,7 +201,6 @@ def test_binary_probability_classifier_can_explain_log_odds():
         explainer = TreeIGNumeric(
             model,
             baseline=X[0],
-            probability_to_score=True,
             probability_floor=floor,
             grid_size=128,
         )
@@ -241,7 +240,6 @@ def test_multiclass_probability_classifier_uses_centered_log_scores():
             model,
             baseline=X[0],
             target=2,
-            probability_to_score=True,
             probability_floor=floor,
             grid_size=256,
         )
@@ -266,7 +264,6 @@ def test_probability_score_requires_explicit_floor_at_zero():
         explainer = TreeIGNumeric(
             model,
             baseline=X[0],
-            probability_to_score=True,
         )
 
     with pytest.raises(ValueError, match="probability_floor"):
@@ -292,7 +289,8 @@ def test_probability_floor_requires_score_transformation():
 
     with pytest.raises(ValueError, match="probability_to_score=True"):
         TreeIGNumeric(
-            StepRegressor(), baseline=np.zeros(1), probability_floor=1e-6
+            StepRegressor(), baseline=np.zeros(1),
+            probability_to_score=False, probability_floor=1e-6
         )
 
 
@@ -361,3 +359,62 @@ def test_public_fallback_keeps_small_jumps_with_loose_residual_tolerance():
         UnknownTreeModel(), [0.0], residual_atol=1.0, residual_rtol=0.0
     )
     np.testing.assert_array_equal(explainer.attribute([[1.0]]), [[1e-14]])
+
+
+@pytest.mark.parametrize("interface", ["explainer", "function", "adapter"])
+@pytest.mark.parametrize("probabilities", [False, True])
+def test_probability_only_classifier_requires_explicit_probability_opt_in(interface, probabilities):
+    from sklearn.tree import DecisionTreeClassifier
+    from treeig import compute_numeric
+    from treeig.numeric import make_scalar_fn
+
+    # Both leaves have finite probabilities: 1/3 and 2/3 for the positive class.
+    X = np.array([[0.0], [0.0], [0.0], [1.0], [1.0], [1.0]])
+    model = DecisionTreeClassifier(max_depth=1, random_state=0).fit(
+        X, [0, 0, 1, 0, 1, 1]
+    )
+    points = np.array([[0.0], [1.0]])
+    options = {"probability_to_score": False} if probabilities else {}
+    proba = model.predict_proba(points)
+    expected = proba[:, 1] if probabilities else np.log(proba[:, 1] / proba[:, 0])
+    warning = "explaining a class probability" if probabilities else "deriving a score"
+    with pytest.warns(RuntimeWarning, match=warning):
+        if interface == "adapter":
+            output = make_scalar_fn(model, **options)(points)
+        elif interface == "function":
+            result = compute_numeric(model, points[0], points, grid_size=16, **options)
+            output = result.base_values + result.values.sum(axis=1)
+            np.testing.assert_allclose(result.base_values, expected[0])
+        else:
+            explainer = TreeIGNumeric(model, points[0], grid_size=16, **options)
+            output = explainer.model_output(points)
+            result = explainer.explain(points)
+            np.testing.assert_allclose(result.base_values, expected[0])
+            np.testing.assert_allclose(result.values.sum(axis=1), expected - expected[0])
+    np.testing.assert_allclose(output, expected)
+
+
+def test_multiclass_probability_opt_in_preserves_probabilities_including_zeros():
+    from sklearn.tree import DecisionTreeClassifier
+
+    X = np.array([[0.0], [1.0], [2.0]])
+    model = DecisionTreeClassifier(random_state=0).fit(X, [0, 1, 2])
+    with pytest.warns(RuntimeWarning, match="explaining a class probability"):
+        explainer = TreeIGNumeric(
+            model, X[0], target=2, probability_to_score=False, grid_size=16
+        )
+    np.testing.assert_allclose(explainer.model_output(X), model.predict_proba(X)[:, 2])
+    result = explainer.explain(X)
+    np.testing.assert_allclose(
+        result.base_values + result.values.sum(axis=1), model.predict_proba(X)[:, 2]
+    )
+
+
+@pytest.mark.parametrize("options", [{}, {"probability_to_score": True}, {"probability_to_score": False}])
+def test_native_classification_scores_take_precedence(options):
+    from sklearn.linear_model import LogisticRegression
+    from treeig.numeric import make_scalar_fn
+
+    X = np.array([[-2.0], [-1.0], [1.0], [2.0]])
+    model = LogisticRegression().fit(X, [0, 0, 1, 1])
+    np.testing.assert_allclose(make_scalar_fn(model, **options)(X), model.decision_function(X))
