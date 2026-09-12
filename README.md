@@ -94,9 +94,6 @@ explain the distinction and report measured examples.
 
 ## Documentation
 
-For automated readers, [llms.txt](https://ludgerhentschel.github.io/treeig/llms.txt)
-maps the guides, complete examples, and rendered API reference.
-
 The [user guide](https://ludgerhentschel.github.io/treeig/)
 covers a complete runnable example, baseline distributions, classification,
 plots, loss attribution, numerical conventions, and performance. The Sphinx
