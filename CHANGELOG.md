@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.2
 
 - Change `TreeIGNumeric` and `make_scalar_fn` to derive classification scores
   by default when no native margin exists: binary log odds or centered
@@ -9,6 +9,9 @@
   `probability_to_score=False`. Zero probabilities require an explicit
   `probability_floor` for finite scores; no floor is chosen silently.
 
+- Add an agent documentation index, sitemap, canonical URLs, page descriptions,
+  and build checks for documentation discovery. Clarify exact versus numerical
+  model support, baseline guarantees, and related-project links.
 - Lead the README and documentation landing page with the piecewise-constant
   gradient argument, and move the derivative-impulse figure above the fold.
 - State completeness precision relative to the fitted model's own arithmetic
