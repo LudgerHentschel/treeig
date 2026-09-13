@@ -39,7 +39,16 @@ The method is developed in Ludger Hentschel's
 It builds on Integrated Gradients introduced by Sundararajan, Taly, and Yan in
 [**Axiomatic Attribution for Deep Networks** (ICML 2017)](https://proceedings.mlr.press/v70/sundararajan17a.html).
 
+
 ## Installation
+
+Install from conda-forge with conda:
+
+```bash
+conda install -c conda-forge treeig
+```
+
+Or install from PyPI with pip:
 
 ```bash
 pip install "treeig[sklearn]"
