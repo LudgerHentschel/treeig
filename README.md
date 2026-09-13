@@ -1,7 +1,11 @@
 # TreeIG
 
+[![Tests](https://github.com/LudgerHentschel/treeig/actions/workflows/tests.yml/badge.svg)](https://github.com/LudgerHentschel/treeig/actions/workflows/tests.yml)
+[![Documentation](https://img.shields.io/badge/docs-user%20guide-blue.svg)](https://ludgerhentschel.github.io/treeig/)
 [![PyPI version](https://img.shields.io/pypi/v/treeig.svg)](https://pypi.org/project/treeig/)
-[![Documentation](https://img.shields.io/badge/docs-user%20guide-blue)](https://ludgerhentschel.github.io/treeig/)
+[![Conda-forge version](https://img.shields.io/conda/v/conda-forge/treeig.svg?label=conda-forge)](https://anaconda.org/conda-forge/treeig)
+[![Python versions](https://img.shields.io/pypi/pyversions/treeig.svg)](https://pypi.org/project/treeig/)
+[![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](https://github.com/LudgerHentschel/treeig/blob/main/LICENSE)
 
 **TreeIG computes exact Integrated Gradients for supported numeric tree models.
 A tree's gradient is not well defined; its integrated gradient is.**
