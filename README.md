@@ -126,9 +126,9 @@ for installation and limitations.
 
 | Package | When to use it |
 |---|---|
-| [UnifiedIG](https://ludgerhentschel.github.io/unifiedig/) (`unifiedig`) | A common Integrated Gradients interface across supported tree and smooth model families. |
-| [CBaseline](https://ludgerhentschel.github.io/cbaseline/) (`cbaseline`) | Construct empirical reference distributions; TreeIG accepts its backgrounds with their weights directly. |
-| [skgrad](https://ludgerhentschel.github.io/skgrad/) (`skgrad`) | Obtain analytic input gradients and Jacobians for supported smooth scikit-learn models. |
+| [UnifiedIG](https://github.com/LudgerHentschel/unifiedig) (`unifiedig`) | A common Integrated Gradients interface across supported tree and smooth model families. |
+| [CBaseline](https://github.com/LudgerHentschel/cbaseline) (`cbaseline`) | Construct empirical reference distributions; TreeIG accepts its backgrounds with their weights directly. |
+| [skgrad](https://github.com/LudgerHentschel/skgrad) (`skgrad`) | Obtain analytic input gradients and Jacobians for supported smooth scikit-learn models. |
 
 Use TreeIG directly when you need its tree-specific attribution interface.
 See [the Integrated Gradients stack](https://ludgerhentschel.github.io/treeig/ig-stack.html)
